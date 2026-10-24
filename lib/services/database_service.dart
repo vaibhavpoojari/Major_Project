@@ -73,10 +73,11 @@ class DatabaseService {
   static final List<Map<String, dynamic>> _mockEngineStates = [];
 
   // Project Default Configurations for SMS & Email Gateways
-  static const String defaultTextbeeApiKey = 'txb_orA7oouhebOAeDdVfuZFXsDg7BbJfCWp';
-  static const String defaultTextbeeDeviceId = '6a781d7b99101e52a4ca3b24';
-  static const String defaultSmtpEmail = 'accidentgaurd@gmail.com';
-  static const String defaultSmtpPassword = 'fkty hyzb ormn ipis';
+  // Configured securely at build time via --dart-define or at runtime via Driver Dashboard UI.
+  static const String defaultTextbeeApiKey = String.fromEnvironment('TEXTBEE_API_KEY', defaultValue: '');
+  static const String defaultTextbeeDeviceId = String.fromEnvironment('TEXTBEE_DEVICE_ID', defaultValue: '');
+  static const String defaultSmtpEmail = String.fromEnvironment('SMTP_EMAIL', defaultValue: '');
+  static const String defaultSmtpPassword = String.fromEnvironment('SMTP_PASSWORD', defaultValue: '');
 
   // Global static init
   static Future<void> init() async {
@@ -96,25 +97,25 @@ class DatabaseService {
 
     // 1. TextBee SMS API Key
     final String? currentApiKey = prefs.getString('textbee_api_key');
-    if (currentApiKey == null || currentApiKey.trim().isEmpty) {
+    if ((currentApiKey == null || currentApiKey.trim().isEmpty) && defaultTextbeeApiKey.isNotEmpty) {
       await prefs.setString('textbee_api_key', defaultTextbeeApiKey);
     }
 
     // 2. TextBee Device ID
     final String? currentDeviceId = prefs.getString('textbee_device_id');
-    if (currentDeviceId == null || currentDeviceId.trim().isEmpty) {
+    if ((currentDeviceId == null || currentDeviceId.trim().isEmpty) && defaultTextbeeDeviceId.isNotEmpty) {
       await prefs.setString('textbee_device_id', defaultTextbeeDeviceId);
     }
 
     // 3. Sender Gmail Address
     final String? currentEmail = prefs.getString('smtp_email');
-    if (currentEmail == null || currentEmail.trim().isEmpty) {
+    if ((currentEmail == null || currentEmail.trim().isEmpty) && defaultSmtpEmail.isNotEmpty) {
       await prefs.setString('smtp_email', defaultSmtpEmail);
     }
 
     // 4. Gmail App Password
     final String? currentPassword = prefs.getString('smtp_password');
-    if (currentPassword == null || currentPassword.trim().isEmpty) {
+    if ((currentPassword == null || currentPassword.trim().isEmpty) && defaultSmtpPassword.isNotEmpty) {
       await prefs.setString('smtp_password', defaultSmtpPassword);
     }
   }

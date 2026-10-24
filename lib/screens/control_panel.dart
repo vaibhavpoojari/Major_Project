@@ -392,6 +392,99 @@ class _ControlPanelState extends State<ControlPanel> {
                     ),
                   ),
                 ),
+                const SizedBox(height: 18),
+
+                // Android Background & Screen-Off Telematics Advisory
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 170),
+                  child: Container(
+                    padding: const EdgeInsets.all(16),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF0F172A),
+                      borderRadius: BorderRadius.circular(16),
+                      border: Border.all(color: const Color(0xFF26334D)),
+                    ),
+                    child: const Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Icon(Icons.screen_lock_portrait_rounded, size: 22, color: Color(0xFF38BDF8)),
+                        SizedBox(width: 12),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "Transit Telematics Advisory (Screen-On Required)",
+                                style: TextStyle(
+                                  fontFamily: 'Outfit',
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Colors.white,
+                                ),
+                              ),
+                              SizedBox(height: 3),
+                              Text(
+                                "Standard Android OS power saving stops accelerometer listeners when the display turns off. For uninterrupted collision monitoring during transit, keep the phone display active or mounted on a vehicle charger.",
+                                style: TextStyle(
+                                  fontFamily: 'Inter',
+                                  fontSize: 12,
+                                  color: Color(0xFF94A3B8),
+                                  height: 1.35,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Emergency Ecosystem Comparison Action Card
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 190),
+                  child: InteractivePressable(
+                    onTap: () {
+                      showDialog(
+                        context: context,
+                        builder: (_) => const EmergencySystemComparisonDialog(),
+                      );
+                    },
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(horizontal: 18, vertical: 14),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFF161E2E),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFF26334D)),
+                      ),
+                      child: const Row(
+                        children: [
+                          Icon(Icons.compare_arrows_rounded, color: Color(0xFF38BDF8), size: 24),
+                          SizedBox(width: 14),
+                          Expanded(
+                            child: Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  "Emergency System Comparison",
+                                  style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
+                                ),
+                                SizedBox(height: 2),
+                                Text(
+                                  "Factual breakdown: Accident Guard vs. Phone Built-In Crash Detection & India 112",
+                                  style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Color(0xFF94A3B8)),
+                                ),
+                              ],
+                            ),
+                          ),
+                          Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF64748B)),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
                 const SizedBox(height: 24),
 
                 // TextBee SMS Gateway Card

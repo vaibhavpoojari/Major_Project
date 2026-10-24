@@ -452,7 +452,7 @@ void main() {
           'parentPhone': '+919876543210',
           'parentEmail': 'test@example.com',
         },
-        crashType: 'Rollover Crash',
+        crashType: 'Primary Z-Axis Vector Impact',
         overrideLatitude: 12.9716,
         overrideLongitude: 77.5946,
       );
@@ -460,10 +460,63 @@ void main() {
       expect(results.containsKey('parentSmsResult'), true);
       expect(results.containsKey('parentSmsStatus'), true);
       expect(results['parentPhone'], '+919876543210');
-      // If OSM hospital phone is missing, it should skip hospital SMS without using a fake number
+      // If OSM hospital phone is missing, it should never dispatch SMS to hospital or claim dispatch
       if (results['hasValidHospitalPhone'] != true) {
-        expect(results['hospitalSmsStatus'], contains('Skipped'));
+        final status = results['hospitalSmsStatus'].toString();
+        expect(
+          status.contains('Hospital found, phone number unavailable') || status.contains('Skipped'),
+          true,
+        );
+        expect(results['hospitalSent'], false);
       }
+    });
+
+    test('Hospital phone normalization handles raw OSM phone numbers accurately', () {
+      expect(HospitalService.normalizePhoneNumber('+918022868423'), '+918022868423');
+      expect(HospitalService.normalizePhoneNumber('080 2222 1111'), '+918022221111');
+      expect(HospitalService.normalizePhoneNumber('"080 2286 6529'), '+918022866529');
+      expect(HospitalService.normalizePhoneNumber('97390 07505'), '+919739007505');
+      expect(HospitalService.normalizePhoneNumber('080-2220 3333; 080-2220 4444'), '+918022203333');
+      expect(HospitalService.normalizePhoneNumber('+91 80 2297 7400 / 2297 7401'), '+918022977400');
+      expect(HospitalService.normalizePhoneNumber('9876543210'), '+919876543210');
+      expect(HospitalService.normalizePhoneNumber('108'), null);
+      expect(HospitalService.normalizePhoneNumber(''), null);
+      expect(HospitalService.normalizePhoneNumber('N/A'), null);
+    });
+
+    test('extractHospitalPhone extracts and prioritizes valid contact tags', () {
+      final tags1 = {'phone': '080 2222 1111', 'contact:phone': '+918022868423'};
+      expect(HospitalService.extractHospitalPhone(tags1), '+918022221111');
+
+      final tags2 = {'contact:phone': '+918022868423'};
+      expect(HospitalService.extractHospitalPhone(tags2), '+918022868423');
+
+      final tags3 = {'telephone': '080-2344 9632'};
+      expect(HospitalService.extractHospitalPhone(tags3), '+918023449632');
+
+      final tags4 = {'emergency:phone': '+919876543210'};
+      expect(HospitalService.extractHospitalPhone(tags4), '+919876543210');
+
+      final tags5 = {'amenity': 'hospital', 'name': 'General Hospital'};
+      expect(HospitalService.extractHospitalPhone(tags5), null);
+    });
+
+    test('Nearest hospital details are preserved even when phone is unavailable', () {
+      final hospital = HospitalService.classifyFacility(
+        name: 'Bengaluru District Hospital',
+        latitude: 12.9716,
+        longitude: 77.5946,
+        distanceKm: 1.45,
+        tags: {'amenity': 'hospital'},
+      );
+
+      expect(hospital.name, 'Bengaluru District Hospital');
+      expect(hospital.distanceKm, 1.45);
+      expect(hospital.phone, null);
+      final map = hospital.toMap();
+      expect(map['hasValidPhone'], false);
+      expect(map['facilityName'], 'Bengaluru District Hospital');
+      expect(map['distanceKm'], 1.45);
     });
 
     test('SMS failure does not stop email or crash report logging', () async {
@@ -475,7 +528,7 @@ void main() {
           'parentPhone': '', // empty phone -> failed SMS
           'parentEmail': 'resilient@example.com',
         },
-        crashType: 'Rear-End Impact',
+        crashType: 'Primary Y-Axis Vector Impact',
         overrideLatitude: 12.9716,
         overrideLongitude: 77.5946,
       );
@@ -540,15 +593,52 @@ void main() {
     });
   });
 
-  group('Project Automatic SMS & Email Configuration', () {
-    test('DatabaseService defines exact requested project default constants', () {
-      expect(DatabaseService.defaultTextbeeDeviceId, '6a781d7b99101e52a4ca3b24');
-      expect(DatabaseService.defaultTextbeeApiKey, 'txb_orA7oouhebOAeDdVfuZFXsDg7BbJfCWp');
-      expect(DatabaseService.defaultSmtpEmail, 'accidentgaurd@gmail.com');
-      expect(DatabaseService.defaultSmtpPassword, 'fkty hyzb ormn ipis');
+  group('X/Y/Z Vector Direction Terminology & Classification', () {
+    test('X-axis dominant force classifies as Primary X-Axis Vector', () {
+      final service = SensorService();
+      final type = service.classifyCrash(42.0, 5.0, 2.0, 42.3);
+      expect(type, contains('X-Axis'));
+      expect(type, isNot(contains('Rollover')));
     });
 
-    test('Fresh installation initializes missing project defaults automatically', () async {
+    test('Y-axis dominant force classifies as Primary Y-Axis Vector', () {
+      final service = SensorService();
+      final type = service.classifyCrash(2.0, 40.0, 5.0, 40.3);
+      expect(type, contains('Y-Axis'));
+      expect(type, isNot(contains('Rollover')));
+    });
+
+    test('Z-axis dominant force classifies as Primary Z-Axis Vector', () {
+      final service = SensorService();
+      final type = service.classifyCrash(1.0, 2.0, 38.0, 38.1);
+      expect(type, contains('Z-Axis'));
+      expect(type, isNot(contains('Rollover')));
+    });
+
+    test('SensorVectorReading model initializes accurately with timestamps', () {
+      final reading = SensorVectorReading(
+        x: 1.2,
+        y: 2.3,
+        z: 3.4,
+        magnitude: 4.28,
+        timestamp: DateTime.now(),
+      );
+      expect(reading.x, 1.2);
+      expect(reading.y, 2.3);
+      expect(reading.z, 3.4);
+      expect(reading.magnitude, 4.28);
+    });
+  });
+
+  group('Project Automatic SMS & Email Configuration', () {
+    test('DatabaseService defines environment configuration constants', () {
+      expect(DatabaseService.defaultTextbeeDeviceId, isA<String>());
+      expect(DatabaseService.defaultTextbeeApiKey, isA<String>());
+      expect(DatabaseService.defaultSmtpEmail, isA<String>());
+      expect(DatabaseService.defaultSmtpPassword, isA<String>());
+    });
+
+    test('Fresh installation initializes missing project defaults cleanly', () async {
       SharedPreferences.setMockInitialValues({});
       final prefs = await SharedPreferences.getInstance();
 
@@ -561,11 +651,10 @@ void main() {
       // Execute initialization
       await DatabaseService.initDefaultConfigurations(prefs);
 
-      // After init, default values should be present
-      expect(prefs.getString('textbee_api_key'), 'txb_orA7oouhebOAeDdVfuZFXsDg7BbJfCWp');
-      expect(prefs.getString('textbee_device_id'), '6a781d7b99101e52a4ca3b24');
-      expect(prefs.getString('smtp_email'), 'accidentgaurd@gmail.com');
-      expect(prefs.getString('smtp_password'), 'fkty hyzb ormn ipis');
+      // If environment flags were set, they are populated; otherwise clean
+      if (DatabaseService.defaultTextbeeApiKey.isNotEmpty) {
+        expect(prefs.getString('textbee_api_key'), DatabaseService.defaultTextbeeApiKey);
+      }
     });
 
     test('Existing saved configuration is strictly preserved and not overwritten', () async {

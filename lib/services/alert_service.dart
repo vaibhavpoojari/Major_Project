@@ -17,6 +17,7 @@ class SmsDispatchResult {
   final bool isSuccess;
   final int elapsedMs;
   final String? errorMessage;
+  final bool deliveryConfirmed;
 
   SmsDispatchResult({
     required this.recipient,
@@ -27,6 +28,7 @@ class SmsDispatchResult {
     required this.isSuccess,
     required this.elapsedMs,
     this.errorMessage,
+    this.deliveryConfirmed = false,
   });
 
   Map<String, dynamic> toMap() {
@@ -39,6 +41,7 @@ class SmsDispatchResult {
       'isSuccess': isSuccess,
       'elapsedMs': elapsedMs,
       'errorMessage': errorMessage,
+      'deliveryConfirmed': deliveryConfirmed,
     };
   }
 }
@@ -105,7 +108,10 @@ class AlertService {
     double? lat = overrideLatitude;
     double? lng = overrideLongitude;
 
-    if (lat == null || lng == null) {
+    if (lat != null && lng != null) {
+      lat = double.parse(lat.toStringAsFixed(5));
+      lng = double.parse(lng.toStringAsFixed(5));
+    } else {
       Position? position;
       try {
         bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
@@ -129,7 +135,7 @@ class AlertService {
             try {
               position = await Geolocator.getCurrentPosition(
                 desiredAccuracy: LocationAccuracy.high,
-                timeLimit: const Duration(seconds: 3),
+                timeLimit: const Duration(seconds: 6),
               );
             } catch (e) {
               print("AlertService: Live GPS fast lock timed out ($e), attempting last known GPS position...");
@@ -150,8 +156,8 @@ class AlertService {
 
       final pos = position;
       if (pos != null) {
-        lat = pos.latitude;
-        lng = pos.longitude;
+        lat = double.parse(pos.latitude.toStringAsFixed(5));
+        lng = double.parse(pos.longitude.toStringAsFixed(5));
       }
     }
 
@@ -208,35 +214,77 @@ class AlertService {
       String? hospitalPhone;
       String? hospitalEmail;
       bool hasValidHospitalPhone = false;
+      String hospitalLookupMessage = "";
 
       if (hasValidGps && actualLat != null && actualLng != null) {
         print("SEARCHING HOSPITALS AROUND CURRENT LOCATION");
-        topHospitals = await HospitalService.findTopNearbyHospitals(
+        final searchResult = await HospitalService.searchNearbyHospitals(
           latitude: actualLat,
           longitude: actualLng,
         );
 
+        topHospitals = searchResult.hospitals;
+        hospitalLookupMessage = searchResult.statusMessage;
         nearestHospital = topHospitals.isNotEmpty ? topHospitals.first : null;
-        hospitalName = nearestHospital != null ? nearestHospital.name : "Nearby hospital unavailable";
-        hospitalDistance = nearestHospital?.distanceKm;
-        hospitalAddress = nearestHospital?.address;
-        hospitalPhone = nearestHospital?.phone;
-        hospitalEmail = nearestHospital?.email;
-        hasValidHospitalPhone = hospitalPhone != null && hospitalPhone.trim().isNotEmpty;
+
+        if (nearestHospital != null) {
+          hospitalName = nearestHospital.name;
+          hospitalDistance = nearestHospital.distanceKm;
+          hospitalAddress = nearestHospital.address;
+          hospitalPhone = nearestHospital.phone;
+          hospitalEmail = nearestHospital.email;
+          hasValidHospitalPhone = hospitalPhone != null && hospitalPhone.trim().isNotEmpty;
+        } else {
+          switch (searchResult.status) {
+            case HospitalLookupStatus.timeout:
+              hospitalName = "Nearby hospital lookup timed out";
+              break;
+            case HospitalLookupStatus.apiError:
+              hospitalName = "Hospital lookup failed (API error)";
+              break;
+            case HospitalLookupStatus.networkError:
+              hospitalName = "Hospital lookup failed (Network error)";
+              break;
+            case HospitalLookupStatus.noResults:
+              hospitalName = "No healthcare facilities found within 25 km";
+              break;
+            case HospitalLookupStatus.success:
+              hospitalName = "Nearby hospital unavailable";
+              break;
+          }
+        }
       } else {
         hospitalName = "Nearby hospital unavailable (GPS signal unavailable)";
+        hospitalLookupMessage = "GPS signal unavailable";
       }
 
       print("NEAREST HOSPITAL: $hospitalName");
       print("DISTANCE: ${hospitalDistance != null ? '${hospitalDistance.toStringAsFixed(2)} km' : 'Unavailable'}");
-      print("PHONE: ${hasValidHospitalPhone && hospitalPhone != null ? hospitalPhone : 'Unavailable'}");
+      print("PHONE: ${hasValidHospitalPhone && hospitalPhone != null ? maskPhoneNumber(hospitalPhone) : (nearestHospital != null ? 'Hospital found, phone number unavailable' : 'Unavailable')}");
 
       // Hospital SMS Task (ONLY dispatched if valid phone exists from OSM)
       SmsDispatchResult? hospitalSmsResult;
+      String hospitalSmsStatus;
+
       if (hasValidHospitalPhone && hospitalPhone != null && hospitalPhone.isNotEmpty) {
         hospitalSmsResult = await _sendSingleSms(hospitalPhone, hospitalMsg);
+        hospitalSmsStatus = hospitalSmsResult.statusDisplay;
       } else {
-        print("AlertService: Skipping hospital SMS (Hospital phone unavailable in OSM).");
+        if (nearestHospital != null) {
+          hospitalSmsStatus = "Hospital found, phone number unavailable";
+          print("AlertService: Skipping hospital SMS: Hospital found (${nearestHospital.name}), phone number unavailable in OSM directory.");
+        } else {
+          if (hospitalName.contains('timed out')) {
+            hospitalSmsStatus = "Skipped (Lookup timed out)";
+          } else if (hospitalName.contains('failed')) {
+            hospitalSmsStatus = "Skipped (API lookup failed)";
+          } else if (hospitalName.contains('No healthcare')) {
+            hospitalSmsStatus = "Skipped (No nearby hospital found)";
+          } else {
+            hospitalSmsStatus = "Skipped (Hospital unavailable)";
+          }
+          print("AlertService: Skipping hospital SMS: $hospitalName.");
+        }
       }
 
       // Hospital Email Task
@@ -259,7 +307,9 @@ class AlertService {
         'hospitalEmail': hospitalEmail,
         'hasValidHospitalPhone': hasValidHospitalPhone,
         'hospitalSmsResult': hospitalSmsResult,
+        'hospitalSmsStatus': hospitalSmsStatus,
         'hospitalEmailSent': hospitalEmailSent,
+        'hospitalLookupMessage': hospitalLookupMessage,
       };
     }();
 
@@ -287,17 +337,27 @@ class AlertService {
     final bool parentEmailSent = results[2] as bool;
 
     final List<HospitalModel> topHospitals = hospData['topHospitals'] as List<HospitalModel>;
+    final HospitalModel? nearestHospital = hospData['nearestHospital'] as HospitalModel?;
     final String hospitalName = hospData['hospitalName'] as String;
     final double? hospitalDistance = hospData['hospitalDistance'] as double?;
     final String? hospitalAddress = hospData['hospitalAddress'] as String?;
     final String? hospitalPhone = hospData['hospitalPhone'] as String?;
     final bool hasValidHospitalPhone = hospData['hasValidHospitalPhone'] as bool;
     final SmsDispatchResult? hospitalSmsResult = hospData['hospitalSmsResult'] as SmsDispatchResult?;
+    final String hospitalSmsStatus = hospData['hospitalSmsStatus'] as String;
     final bool hospitalEmailSent = hospData['hospitalEmailSent'] as bool;
 
     final bool parentSent = parentSmsResult.isSuccess;
     final bool hospitalSent = hospitalSmsResult?.isSuccess ?? false;
     final bool emailSent = parentEmailSent || hospitalEmailSent;
+
+    final String distanceStr = hospitalDistance != null
+        ? "${hospitalDistance.toStringAsFixed(2)} km"
+        : (nearestHospital != null
+            ? "Distance unavailable"
+            : (hospitalName.contains('timed out')
+                ? "Lookup timed out"
+                : (hospitalName.contains('failed') ? "API error" : "Distance unavailable")));
 
     // Log crash report to database
     try {
@@ -309,7 +369,7 @@ class AlertService {
         'crashType': crashType,
         'nearestHospital': hospitalName,
         'hospitalDistance': hospitalDistance != null ? "${hospitalDistance.toStringAsFixed(2)} km" : "N/A",
-        'hospitalPhone': hospitalPhone ?? "Unavailable",
+        'hospitalPhone': hasValidHospitalPhone && hospitalPhone != null ? hospitalPhone : "Unavailable",
         'status': 'Pending',
       });
     } catch (e) {
@@ -322,8 +382,11 @@ class AlertService {
       'hasValidGps': hasValidGps,
       'nearestHospital': hospitalName,
       'distance': hospitalDistance,
+      'distanceStr': distanceStr,
       'hospitalAddress': hospitalAddress,
-      'hospitalPhone': hasValidHospitalPhone ? hospitalPhone : 'Hospital phone unavailable',
+      'hospitalPhone': hasValidHospitalPhone
+          ? hospitalPhone
+          : (nearestHospital != null ? 'Hospital found, phone number unavailable' : 'Hospital phone unavailable'),
       'hasValidHospitalPhone': hasValidHospitalPhone,
       'topHospitals': topHospitals.map((h) => h.toMap()).toList(),
       'parentPhone': parentPhone,
@@ -334,12 +397,11 @@ class AlertService {
       'parentSmsResult': parentSmsResult.toMap(),
       'hospitalSmsResult': hospitalSmsResult?.toMap(),
       'parentSmsStatus': parentSmsResult.statusDisplay,
-      'hospitalSmsStatus': hospitalSmsResult != null
-          ? hospitalSmsResult.statusDisplay
-          : (hasValidHospitalPhone ? 'Failed' : 'Skipped (phone unavailable)'),
+      'hospitalSmsStatus': hospitalSmsStatus,
       'emailSent': emailSent,
       'parentEmailSent': parentEmailSent,
       'hospitalEmailSent': hospitalEmailSent,
+      'hospitalNotified': hospitalSent || hospitalEmailSent,
       'parentEmail': parentEmail,
       'hospitalEmail': hospData['hospitalEmail'] ?? '',
     };
@@ -677,7 +739,7 @@ class AlertService {
     print("Request time: $nativeTime");
 
     try {
-      final dynamic result = await platform.invokeMethod('sendSms', {
+      await platform.invokeMethod('sendSms', {
         'phoneNumber': formatted,
         'message': message,
       });

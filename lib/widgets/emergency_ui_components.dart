@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import '../services/sensor_service.dart';
 
 enum BadgeStatusType {
   active,
@@ -582,6 +583,23 @@ class EmergencyHospitalCard extends StatelessWidget {
                       ),
                   ],
                 ),
+              ] else ...[
+                const Divider(height: 20, color: Color(0xFF26334D)),
+                const Row(
+                  children: [
+                    Icon(Icons.phone_disabled_outlined, size: 14, color: Color(0xFF94A3B8)),
+                    SizedBox(width: 6),
+                    Text(
+                      "Phone number unavailable in directory",
+                      style: TextStyle(
+                        fontFamily: 'Inter',
+                        fontSize: 12,
+                        fontStyle: FontStyle.italic,
+                        color: Color(0xFF94A3B8),
+                      ),
+                    ),
+                  ],
+                ),
               ],
             ],
           ),
@@ -590,3 +608,484 @@ class EmergencyHospitalCard extends StatelessWidget {
     );
   }
 }
+
+/// Real-time 3-Axis (X/Y/Z + Magnitude) Accelerometer Waveform Graph
+class RealtimeAccelerometerGraph extends StatefulWidget {
+  final List<SensorVectorReading> buffer;
+  final double currentX;
+  final double currentY;
+  final double currentZ;
+  final double currentMagnitude;
+  final double threshold;
+
+  const RealtimeAccelerometerGraph({
+    super.key,
+    required this.buffer,
+    required this.currentX,
+    required this.currentY,
+    required this.currentZ,
+    required this.currentMagnitude,
+    this.threshold = SensorService.crashThreshold,
+  });
+
+  @override
+  State<RealtimeAccelerometerGraph> createState() => _RealtimeAccelerometerGraphState();
+}
+
+class _RealtimeAccelerometerGraphState extends State<RealtimeAccelerometerGraph> {
+  String _selectedChannel = 'All'; // 'All', 'X', 'Y', 'Z', 'Mag'
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(16.0),
+      decoration: BoxDecoration(
+        color: const Color(0xFF161E2E),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFF26334D)),
+        boxShadow: [
+          BoxShadow(
+            color: Colors.black.withValues(alpha: 0.25),
+            blurRadius: 14,
+            offset: const Offset(0, 4),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.stretch,
+        children: [
+          // Header with channel filter chips
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              const Row(
+                children: [
+                  Icon(Icons.show_chart_rounded, size: 18, color: Color(0xFF38BDF8)),
+                  SizedBox(width: 8),
+                  Text(
+                    "REAL-TIME X/Y/Z ACCELEROMETER",
+                    style: TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 12,
+                      fontWeight: FontWeight.bold,
+                      color: Color(0xFF94A3B8),
+                      letterSpacing: 1.0,
+                    ),
+                  ),
+                ],
+              ),
+              // Channel selection dropdown or badge
+              Container(
+                padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+                decoration: BoxDecoration(
+                  color: const Color(0xFF0F172A),
+                  borderRadius: BorderRadius.circular(10),
+                  border: Border.all(color: const Color(0xFF26334D)),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: ['All', 'X', 'Y', 'Z', '|a|'].map((ch) {
+                    final isSel = _selectedChannel == ch;
+                    return GestureDetector(
+                      onTap: () => setState(() => _selectedChannel = ch),
+                      child: Container(
+                        margin: const EdgeInsets.symmetric(horizontal: 2),
+                        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 2),
+                        decoration: BoxDecoration(
+                          color: isSel ? const Color(0xFF38BDF8).withValues(alpha: 0.25) : Colors.transparent,
+                          borderRadius: BorderRadius.circular(6),
+                        ),
+                        child: Text(
+                          ch,
+                          style: TextStyle(
+                            fontFamily: 'Outfit',
+                            fontSize: 11,
+                            fontWeight: FontWeight.bold,
+                            color: isSel ? const Color(0xFF38BDF8) : const Color(0xFF64748B),
+                          ),
+                        ),
+                      ),
+                    );
+                  }).toList(),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 12),
+
+          // Live Metric Readout Strip
+          Row(
+            children: [
+              _buildChannelChip("X", widget.currentX, const Color(0xFFEF4444)),
+              const SizedBox(width: 6),
+              _buildChannelChip("Y", widget.currentY, const Color(0xFF10B981)),
+              const SizedBox(width: 6),
+              _buildChannelChip("Z", widget.currentZ, const Color(0xFF38BDF8)),
+              const SizedBox(width: 6),
+              _buildChannelChip("|a|", widget.currentMagnitude, const Color(0xFFF59E0B)),
+            ],
+          ),
+          const SizedBox(height: 14),
+
+          // Custom Painted Waveform Canvas
+          SizedBox(
+            height: 150,
+            width: double.infinity,
+            child: ClipRRect(
+              borderRadius: BorderRadius.circular(12),
+              child: CustomPaint(
+                painter: _AccelerometerWaveformPainter(
+                  readings: widget.buffer,
+                  currentX: widget.currentX,
+                  currentY: widget.currentY,
+                  currentZ: widget.currentZ,
+                  currentMagnitude: widget.currentMagnitude,
+                  threshold: widget.threshold,
+                  channelFilter: _selectedChannel,
+                ),
+              ),
+            ),
+          ),
+          const SizedBox(height: 10),
+
+          // Subtext Legend & Scale Info
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Row(
+                children: [
+                  Container(width: 8, height: 2, color: const Color(0xFFEF4444)),
+                  const SizedBox(width: 4),
+                  const Text("X: Lat", style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Color(0xFF64748B))),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 2, color: const Color(0xFF10B981)),
+                  const SizedBox(width: 4),
+                  const Text("Y: Long", style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Color(0xFF64748B))),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 2, color: const Color(0xFF38BDF8)),
+                  const SizedBox(width: 4),
+                  const Text("Z: Norm", style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Color(0xFF64748B))),
+                  const SizedBox(width: 8),
+                  Container(width: 8, height: 2, color: const Color(0xFFF59E0B)),
+                  const SizedBox(width: 4),
+                  const Text("|a|", style: TextStyle(fontFamily: 'Inter', fontSize: 10, color: Color(0xFF64748B))),
+                ],
+              ),
+              Text(
+                "Trigger: ≥${widget.threshold.toInt()} m/s²",
+                style: const TextStyle(
+                  fontFamily: 'Inter',
+                  fontSize: 10.5,
+                  fontWeight: FontWeight.bold,
+                  color: Color(0xFFFB7185),
+                ),
+              ),
+            ],
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildChannelChip(String label, double val, Color color) {
+    return Expanded(
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 5),
+        decoration: BoxDecoration(
+          color: color.withValues(alpha: 0.1),
+          borderRadius: BorderRadius.circular(8),
+          border: Border.all(color: color.withValues(alpha: 0.3)),
+        ),
+        child: Column(
+          children: [
+            Text(
+              label,
+              style: TextStyle(fontFamily: 'Outfit', fontSize: 10, fontWeight: FontWeight.bold, color: color),
+            ),
+            const SizedBox(height: 2),
+            Text(
+              val.toStringAsFixed(1),
+              style: const TextStyle(fontFamily: 'Inter', fontSize: 12, fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _AccelerometerWaveformPainter extends CustomPainter {
+  final List<SensorVectorReading> readings;
+  final double currentX;
+  final double currentY;
+  final double currentZ;
+  final double currentMagnitude;
+  final double threshold;
+  final String channelFilter;
+
+  _AccelerometerWaveformPainter({
+    required this.readings,
+    required this.currentX,
+    required this.currentY,
+    required this.currentZ,
+    required this.currentMagnitude,
+    required this.threshold,
+    required this.channelFilter,
+  });
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    // 1. Background Grid & Framing
+    final bgPaint = Paint()..color = const Color(0xFF0F172A);
+    canvas.drawRect(Rect.fromLTWH(0, 0, size.width, size.height), bgPaint);
+
+    final double midY = size.height / 2;
+    const double maxRange = 50.0; // +/- 50 m/s^2 full scale
+
+    double valueToY(double val) {
+      final clamped = val.clamp(-maxRange, maxRange);
+      return midY - (clamped / maxRange) * (size.height / 2 - 8);
+    }
+
+    // Grid baseline lines (0, +/-25, +/-35 m/s^2)
+    final gridPaint = Paint()
+      ..color = const Color(0xFF1E293B)
+      ..strokeWidth = 1.0;
+
+    // Baseline 0 m/s^2
+    canvas.drawLine(Offset(0, midY), Offset(size.width, midY), gridPaint);
+
+    // Grid +/- 20 m/s^2
+    canvas.drawLine(Offset(0, valueToY(20)), Offset(size.width, valueToY(20)), gridPaint);
+    canvas.drawLine(Offset(0, valueToY(-20)), Offset(size.width, valueToY(-20)), gridPaint);
+
+    // Alarm Threshold +/- 35 m/s^2 dashed red line
+    final threshPaint = Paint()
+      ..color = const Color(0xFFEF4444).withValues(alpha: 0.6)
+      ..strokeWidth = 1.2
+      ..style = PaintingStyle.stroke;
+
+    final double threshYPos = valueToY(threshold);
+    final double threshYNeg = valueToY(-threshold);
+
+    for (double x = 0; x < size.width; x += 10) {
+      canvas.drawLine(Offset(x, threshYPos), Offset(x + 5, threshYPos), threshPaint);
+      canvas.drawLine(Offset(x, threshYNeg), Offset(x + 5, threshYNeg), threshPaint);
+    }
+
+    if (readings.isEmpty) return;
+
+    // Draw lines for active channels
+    void drawChannelLine(List<double> values, Color color, double strokeW) {
+      if (values.length < 2) return;
+      final path = Path();
+      final paint = Paint()
+        ..color = color
+        ..strokeWidth = strokeW
+        ..style = PaintingStyle.stroke
+        ..strokeCap = StrokeCap.round
+        ..strokeJoin = StrokeJoin.round;
+
+      final double stepX = size.width / (values.length - 1);
+
+      for (int i = 0; i < values.length; i++) {
+        final double x = i * stepX;
+        final double y = valueToY(values[i]);
+        if (i == 0) {
+          path.moveTo(x, y);
+        } else {
+          path.lineTo(x, y);
+        }
+      }
+
+      canvas.drawPath(path, paint);
+
+      // Latest point dot indicator
+      final latestX = (values.length - 1) * stepX;
+      final latestY = valueToY(values.last);
+      final dotPaint = Paint()..color = color;
+      canvas.drawCircle(Offset(latestX, latestY), 3.0, dotPaint);
+    }
+
+    final xVals = readings.map((r) => r.x).toList();
+    final yVals = readings.map((r) => r.y).toList();
+    final zVals = readings.map((r) => r.z).toList();
+    final magVals = readings.map((r) => r.magnitude).toList();
+
+    if (channelFilter == 'All' || channelFilter == 'X') {
+      drawChannelLine(xVals, const Color(0xFFEF4444), 1.6);
+    }
+    if (channelFilter == 'All' || channelFilter == 'Y') {
+      drawChannelLine(yVals, const Color(0xFF10B981), 1.6);
+    }
+    if (channelFilter == 'All' || channelFilter == 'Z') {
+      drawChannelLine(zVals, const Color(0xFF38BDF8), 1.6);
+    }
+    if (channelFilter == 'All' || channelFilter == '|a|') {
+      drawChannelLine(magVals, const Color(0xFFF59E0B), 2.2);
+    }
+  }
+
+  @override
+  bool shouldRepaint(covariant _AccelerometerWaveformPainter oldDelegate) => true;
+}
+
+/// Concise, factual comparison dialog: Accident Guard vs. Phone Built-In Crash Detection vs. India 112
+class EmergencySystemComparisonDialog extends StatelessWidget {
+  const EmergencySystemComparisonDialog({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    return AlertDialog(
+      backgroundColor: const Color(0xFF161E2E),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(22),
+        side: const BorderSide(color: Color(0xFF26334D)),
+      ),
+      titlePadding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+      contentPadding: const EdgeInsets.fromLTRB(20, 16, 20, 10),
+      actionsPadding: const EdgeInsets.fromLTRB(20, 0, 20, 16),
+      title: const Row(
+        children: [
+          Icon(Icons.compare_arrows_rounded, color: Color(0xFF38BDF8), size: 24),
+          SizedBox(width: 10),
+          Expanded(
+            child: Text(
+              "Emergency Systems Comparison",
+              style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+            ),
+          ),
+        ],
+      ),
+      content: SizedBox(
+        width: double.maxFinite,
+        child: SingleChildScrollView(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              const Text(
+                "Concise factual evaluation across built-in crash detection, national 112, and Accident Guard:",
+                style: TextStyle(fontFamily: 'Inter', fontSize: 12.5, color: Color(0xFF94A3B8)),
+              ),
+              const SizedBox(height: 16),
+
+              _buildComparisonCard(
+                title: "1. Built-in Phone Crash Detection (Apple / Pixel)",
+                badge: "OS-Level Co-Processor",
+                badgeType: BadgeStatusType.info,
+                points: [
+                  "Sensor Fusion: Proprietary algorithms combining high-g accelerometer (up to 256 Gs), HDR gyroscope, barometer (airbag cabin pressure changes), and microphone.",
+                  "Screen-Off State: Supported 24/7 at low power via dedicated OS-privileged sensor co-processor.",
+                  "Notification Targets: Calls local emergency answering services (911/112) with automated audio and notifies Apple/Google Medical ID contacts.",
+                  "Limitations: Tied to expensive specific smartphone models (iPhone 14+, Pixel 3+). Does not geocode nearest hospitals via OpenStreetMap or dispatch custom medical SMS gateways.",
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              _buildComparisonCard(
+                title: "2. India's 112 Emergency System (ERSS)",
+                badge: "National Public Safety (CAD)",
+                badgeType: BadgeStatusType.warning,
+                points: [
+                  "Mechanism: Unified national helpline across India integrating Police (100), Fire (101), and Ambulance (108).",
+                  "Collision Detection: None on smartphone. Relies on manual telephone call, SMS, or external vehicle-installed AIS-140 GPS panic buttons.",
+                  "Dispatch Routing: Central Emergency Response Centre dispatches the nearest physical government PCR patrol van or 108 ambulance.",
+                  "Limitations: Requires conscious human voice interaction or dedicated vehicle telematics hardware; no automatic smartphone accelerometer detection.",
+                ],
+              ),
+              const SizedBox(height: 12),
+
+              _buildComparisonCard(
+                title: "3. Accident Guard System",
+                badge: "Open Flutter Platform",
+                badgeType: BadgeStatusType.active,
+                points: [
+                  "Detection: Real-time 3-axis accelerometer vector telemetry (|a| ≥ 35.0 m/s²) with X/Y/Z directional decomposition.",
+                  "Autonomous Dispatches: Direct Native SIM SMS, TextBee SMS Gateway, and SMTP Email with GPS link and driver blood group sent directly to personal guardians.",
+                  "Hospital Discovery: Queries OpenStreetMap live to geocode top 3 nearest trauma facilities with driving distances.",
+                  "Screen-Off Limitation: Requires phone screen active / app in foreground due to standard Android OS background sensor throttling policies.",
+                  "Accessibility: Free, device-agnostic, and works on any standard Android smartphone.",
+                ],
+              ),
+            ],
+          ),
+        ),
+      ),
+      actions: [
+        InteractivePressable(
+          onTap: () => Navigator.pop(context),
+          borderRadius: BorderRadius.circular(12),
+          child: Container(
+            padding: const EdgeInsets.symmetric(horizontal: 20, vertical: 11),
+            decoration: BoxDecoration(
+              color: const Color(0xFF1E293B),
+              borderRadius: BorderRadius.circular(12),
+              border: Border.all(color: const Color(0xFF334155)),
+            ),
+            child: const Text(
+              "Close",
+              style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, color: Colors.white),
+            ),
+          ),
+        ),
+      ],
+    );
+  }
+
+  static Widget _buildComparisonCard({
+    required String title,
+    required String badge,
+    required BadgeStatusType badgeType,
+    required List<String> points,
+  }) {
+    return Container(
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: const Color(0xFF0F172A),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFF26334D)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            children: [
+              Expanded(
+                child: Text(
+                  title,
+                  style: const TextStyle(
+                    fontFamily: 'Outfit',
+                    fontWeight: FontWeight.bold,
+                    fontSize: 14,
+                    color: Colors.white,
+                  ),
+                ),
+              ),
+              StatusBadge(label: badge, type: badgeType),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...points.map(
+            (pt) => Padding(
+              padding: const EdgeInsets.only(bottom: 6.0),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Text("• ", style: TextStyle(color: Color(0xFF38BDF8), fontSize: 13, fontWeight: FontWeight.bold)),
+                  Expanded(
+                    child: Text(
+                      pt,
+                      style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: Color(0xFFCBD5E1), height: 1.35),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
