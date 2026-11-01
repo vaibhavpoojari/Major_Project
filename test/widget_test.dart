@@ -452,7 +452,7 @@ void main() {
           'parentPhone': '+919876543210',
           'parentEmail': 'test@example.com',
         },
-        crashType: 'Primary Z-Axis Vector Impact',
+        crashType: 'Rollover Crash',
         overrideLatitude: 12.9716,
         overrideLongitude: 77.5946,
       );
@@ -528,7 +528,7 @@ void main() {
           'parentPhone': '', // empty phone -> failed SMS
           'parentEmail': 'resilient@example.com',
         },
-        crashType: 'Primary Y-Axis Vector Impact',
+        crashType: 'Rear-End Impact',
         overrideLatitude: 12.9716,
         overrideLongitude: 77.5946,
       );
@@ -593,40 +593,23 @@ void main() {
     });
   });
 
-  group('X/Y/Z Vector Direction Terminology & Classification', () {
-    test('X-axis dominant force classifies as Primary X-Axis Vector', () {
+  group('Crash Direction Classification (Frontal, Lateral, Rollover)', () {
+    test('X-axis dominant force classifies as Side Impact (Lateral)', () {
       final service = SensorService();
       final type = service.classifyCrash(42.0, 5.0, 2.0, 42.3);
-      expect(type, contains('X-Axis'));
-      expect(type, isNot(contains('Rollover')));
+      expect(type, contains('Side Impact (Lateral)'));
     });
 
-    test('Y-axis dominant force classifies as Primary Y-Axis Vector', () {
+    test('Y-axis dominant force classifies as Frontal/Rear Collision', () {
       final service = SensorService();
       final type = service.classifyCrash(2.0, 40.0, 5.0, 40.3);
-      expect(type, contains('Y-Axis'));
-      expect(type, isNot(contains('Rollover')));
+      expect(type, contains('Frontal/Rear Collision'));
     });
 
-    test('Z-axis dominant force classifies as Primary Z-Axis Vector', () {
+    test('Z-axis dominant force classifies as Rollover / Vertical Force', () {
       final service = SensorService();
       final type = service.classifyCrash(1.0, 2.0, 38.0, 38.1);
-      expect(type, contains('Z-Axis'));
-      expect(type, isNot(contains('Rollover')));
-    });
-
-    test('SensorVectorReading model initializes accurately with timestamps', () {
-      final reading = SensorVectorReading(
-        x: 1.2,
-        y: 2.3,
-        z: 3.4,
-        magnitude: 4.28,
-        timestamp: DateTime.now(),
-      );
-      expect(reading.x, 1.2);
-      expect(reading.y, 2.3);
-      expect(reading.z, 3.4);
-      expect(reading.magnitude, 4.28);
+      expect(type, contains('Rollover / Vertical Force'));
     });
   });
 

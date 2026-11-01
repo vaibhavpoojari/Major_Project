@@ -1,8 +1,6 @@
 import 'dart:async';
-import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import '../services/sensor_service.dart';
 import '../services/database_service.dart';
 import '../services/alert_service.dart';
@@ -28,21 +26,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
 
   // Live state telemetry
   double _currentForce = 0.0;
-  double _currentX = 0.0;
-  double _currentY = 0.0;
-  double _currentZ = 0.0;
   double _maxForceObserved = 0.0;
   bool _isEngineActive = false;
-
-  // Real-time vector buffer for graphical waveform
-  final List<SensorVectorReading> _vectorBuffer = [];
-  static const int _maxBufferSize = 50;
 
   // Emergency state control
   bool _isEmergencyState = false;
   int _countdownSeconds = 30;
   Timer? _countdownTimer;
-  String _crashType = "High Acceleration Vector Impact";
+  String _crashType = "Severe Collision";
 
   // Animation controller for emergency alert pulse
   late AnimationController _emergencyPulseController;
@@ -50,50 +41,6 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
 
   // Audit Logs
   final List<String> _auditLogs = [];
-
-  // Activity Test Recorder & Benchmarks
-  static const List<Map<String, String>> _benchmarkScenarios = [
-    {
-      'key': 'walking',
-      'title': 'Walking',
-      'subtitle': 'Normal pedestrian gait',
-      'expected': '1.5 – 4.5 m/s²',
-    },
-    {
-      'key': 'safe_drop',
-      'title': 'Safe Phone-Drop',
-      'subtitle': 'Drop onto cushion / bed',
-      'expected': '15 – 28 m/s²',
-    },
-    {
-      'key': 'braking',
-      'title': 'Simulated Braking',
-      'subtitle': 'Rapid vehicle stop motion',
-      'expected': '8 – 18 m/s²',
-    },
-    {
-      'key': 'pothole',
-      'title': 'Simulated Pothole',
-      'subtitle': 'Sharp vertical jolt / bump',
-      'expected': '12 – 24 m/s²',
-    },
-    {
-      'key': 'controlled_impact',
-      'title': 'Controlled Impact',
-      'subtitle': 'Threshold trigger test (≥35 m/s²)',
-      'expected': '≥ 35.0 m/s²',
-    },
-  ];
-
-  Map<String, Map<String, dynamic>> _benchmarkRecords = {};
-  String _selectedBenchmarkKey = 'walking';
-  bool _isRecordingBenchmark = false;
-  int _benchmarkTimerSeconds = 0;
-  Timer? _benchmarkTimer;
-  double _recordingPeakForce = 0.0;
-  double _recordingPeakX = 0.0;
-  double _recordingPeakY = 0.0;
-  double _recordingPeakZ = 0.0;
 
   @override
   void initState() {
@@ -106,39 +53,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       CurvedAnimation(parent: _emergencyPulseController, curve: Curves.easeInOut),
     );
     _loadDrivers();
-    _loadBenchmarks();
     widget.alertService.requestSmsPermission();
     _addLog("Telematics initialized. Select driver profile to start monitoring.");
   }
 
   void _addLog(String msg) {
-    if (mounted) {
-      setState(() {
-        _auditLogs.insert(0, "[${DateTime.now().toString().substring(11, 19)}] $msg");
-      });
-    }
-  }
-
-  Future<void> _loadBenchmarks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final String? raw = prefs.getString('sensor_activity_benchmarks');
-      if (raw != null && raw.isNotEmpty) {
-        final decoded = jsonDecode(raw);
-        if (decoded is Map<String, dynamic>) {
-          setState(() {
-            _benchmarkRecords = decoded.map((k, v) => MapEntry(k, Map<String, dynamic>.from(v as Map)));
-          });
-        }
-      }
-    } catch (_) {}
-  }
-
-  Future<void> _saveBenchmarks() async {
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      await prefs.setString('sensor_activity_benchmarks', jsonEncode(_benchmarkRecords));
-    } catch (_) {}
+    setState(() {
+      _auditLogs.insert(0, "[${DateTime.now().toString().substring(11, 19)}] $msg");
+    });
   }
 
   Future<void> _loadDrivers() async {
@@ -198,9 +120,6 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       setState(() {
         _isEngineActive = false;
         _currentForce = 0.0;
-        _currentX = 0.0;
-        _currentY = 0.0;
-        _currentZ = 0.0;
       });
       _updateEngineState(false);
       _addLog("Telematics engine deactivated.");
@@ -219,122 +138,20 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
         _maxForceObserved = 0.0;
       });
       _updateEngineState(true);
-      _addLog("Telematics engine active: continuous 3-axis accelerometer vector stream running.");
+      _addLog("Telematics engine active: stream analyzing vector acceleration...");
 
       _sensorService.startListening(
-        onVectorUpdate: (x, y, z, magnitude) {
-          if (mounted) {
-            setState(() {
-              _currentX = x;
-              _currentY = y;
-              _currentZ = z;
-              _currentForce = magnitude;
-              if (magnitude > _maxForceObserved) {
-                _maxForceObserved = magnitude;
-              }
-
-              // Update circular vector buffer for real-time waveform graph
-              final reading = SensorVectorReading(
-                x: x,
-                y: y,
-                z: z,
-                magnitude: magnitude,
-                timestamp: DateTime.now(),
-              );
-              _vectorBuffer.add(reading);
-              if (_vectorBuffer.length > _maxBufferSize) {
-                _vectorBuffer.removeAt(0);
-              }
-
-              // Accumulate in active benchmark recording window if running
-              if (_isRecordingBenchmark) {
-                if (magnitude > _recordingPeakForce) {
-                  _recordingPeakForce = magnitude;
-                  _recordingPeakX = x;
-                  _recordingPeakY = y;
-                  _recordingPeakZ = z;
-                }
-              }
-            });
-          }
+        onUpdate: (magnitude) {
+          setState(() {
+            _currentForce = magnitude;
+            if (magnitude > _maxForceObserved) {
+              _maxForceObserved = magnitude;
+            }
+          });
         },
         onCrashDetected: (magnitude, crashType) {
           _triggerEmergencyState(magnitude, crashType);
         },
-      );
-    }
-  }
-
-  void _startBenchmarkRecording() {
-    if (!_isEngineActive) {
-      _toggleSensorEngine();
-    }
-
-    final scenario = _benchmarkScenarios.firstWhere((s) => s['key'] == _selectedBenchmarkKey);
-    setState(() {
-      _isRecordingBenchmark = true;
-      _benchmarkTimerSeconds = 3;
-      _recordingPeakForce = _currentForce;
-      _recordingPeakX = _currentX;
-      _recordingPeakY = _currentY;
-      _recordingPeakZ = _currentZ;
-    });
-
-    _addLog("RECORDING TEST: '${scenario['title']}' for 3s. Perform physical test motion now...");
-
-    _benchmarkTimer?.cancel();
-    _benchmarkTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
-      if (_benchmarkTimerSeconds > 1) {
-        setState(() {
-          _benchmarkTimerSeconds--;
-        });
-      } else {
-        timer.cancel();
-        _finalizeBenchmarkRecording();
-      }
-    });
-  }
-
-  void _finalizeBenchmarkRecording() {
-    final scenario = _benchmarkScenarios.firstWhere((s) => s['key'] == _selectedBenchmarkKey);
-    final bool isTriggered = _recordingPeakForce >= SensorService.crashThreshold;
-    final nowStr = DateTime.now().toString().substring(11, 19);
-
-    setState(() {
-      _isRecordingBenchmark = false;
-      _benchmarkRecords[_selectedBenchmarkKey] = {
-        'activityName': scenario['title']!,
-        'peakForce': _recordingPeakForce,
-        'peakX': _recordingPeakX,
-        'peakY': _recordingPeakY,
-        'peakZ': _recordingPeakZ,
-        'timestamp': nowStr,
-        'isTriggered': isTriggered,
-        'status': isTriggered ? 'Triggered (≥35 m/s²)' : 'Safe (Sub-threshold)',
-      };
-    });
-
-    _saveBenchmarks();
-    _addLog("TEST RECORDED: ${scenario['title']} | Peak: ${_recordingPeakForce.toStringAsFixed(2)} m/s² (X: ${_recordingPeakX.toStringAsFixed(1)}, Y: ${_recordingPeakY.toStringAsFixed(1)}, Z: ${_recordingPeakZ.toStringAsFixed(1)}) | Result: ${isTriggered ? 'Threshold Crossed' : 'Safe'}");
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text("Recorded '${scenario['title']}': Peak ${_recordingPeakForce.toStringAsFixed(2)} m/s²"),
-        backgroundColor: isTriggered ? const Color(0xFFEF4444) : const Color(0xFF10B981),
-      ),
-    );
-  }
-
-  void _clearBenchmarks() async {
-    setState(() {
-      _benchmarkRecords.clear();
-    });
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.remove('sensor_activity_benchmarks');
-    _addLog("Benchmark history cleared. Ready for fresh on-device tests.");
-    if (mounted) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Benchmark records cleared.")),
       );
     }
   }
@@ -399,11 +216,9 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       final List<dynamic> topHospList = results['topHospitals'] is List ? results['topHospitals'] as List : [];
       final String hospitalName = results['nearestHospital'] ?? 'Nearby hospital unavailable';
       final double? dist = results['distance'] as double?;
-      final String distStr = dist != null
-          ? "${dist.toStringAsFixed(2)} km"
-          : (results['distanceStr'] ?? "Distance unavailable");
+      final String distStr = dist != null ? "${dist.toStringAsFixed(2)} km" : "Distance unavailable";
       final String? address = results['hospitalAddress'];
-      final String hospitalPhone = results['hospitalPhone'] ?? 'Hospital found, phone number unavailable';
+      final String hospitalPhone = results['hospitalPhone'] ?? 'Hospital phone unavailable';
       final bool hasHospPhone = results['hasValidHospitalPhone'] == true;
       final bool parentSent = results['parentSent'] == true;
       final bool hospitalSent = results['hospitalSent'] == true;
@@ -436,16 +251,13 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       }
 
       final String parentSmsStatus = results['parentSmsStatus'] ?? (parentSent ? 'Dispatched' : 'Failed');
-      final String hospitalSmsStatus = results['hospitalSmsStatus'] ??
-          (hasHospPhone ? (hospitalSent ? 'Dispatched' : 'Failed') : 'Hospital found, phone number unavailable');
+      final String hospitalSmsStatus = results['hospitalSmsStatus'] ?? (hasHospPhone ? (hospitalSent ? 'Dispatched' : 'Failed') : 'Skipped (phone unavailable)');
 
       _addLog("Parent SMS: $parentSmsStatus (${results['parentPhone']})");
       if (hasHospPhone) {
         _addLog("Hospital SMS: $hospitalSmsStatus ($hospitalPhone)");
-      } else if (topHospList.isNotEmpty) {
-        _addLog("Hospital SMS: Skipped (Hospital found, phone number unavailable)");
       } else {
-        _addLog("Hospital SMS: $hospitalSmsStatus");
+        _addLog("Hospital SMS: Skipped (No phone in OpenStreetMap)");
       }
       _addLog(emailSent ? "Emergency Email alert dispatched" : "Email alert skipped or pending configuration");
       _addLog("Crash report recorded to emergency database");
@@ -459,8 +271,6 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
           parentSmsStatus: parentSmsStatus,
           hospitalSmsStatus: hospitalSmsStatus,
           emailSent: emailSent,
-          hasHospPhone: hasHospPhone,
-          hospitalSent: hospitalSent,
         );
       }
     } catch (e) {
@@ -476,8 +286,6 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
     required String parentSmsStatus,
     required String hospitalSmsStatus,
     required bool emailSent,
-    required bool hasHospPhone,
-    required bool hospitalSent,
   }) {
     showGeneralDialog(
       context: context,
@@ -496,11 +304,9 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
             children: [
               Icon(Icons.warning_rounded, color: Color(0xFFEF4444), size: 24),
               SizedBox(width: 10),
-              Expanded(
-                child: Text(
-                  "Emergency Broadcast Status",
-                  style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
-                ),
+              Text(
+                "Emergency Broadcast Status",
+                style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
               ),
             ],
           ),
@@ -576,58 +382,16 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                     }),
                   const SizedBox(height: 14),
 
-                  // Factual Real-Time Dispatch Status
+                  // Real-Time Dispatch Status
                   const Text(
-                    "Factual Dispatch Summary:",
+                    "Real-Time Dispatch Summary:",
                     style: TextStyle(fontFamily: 'Outfit', fontSize: 15, fontWeight: FontWeight.bold, color: Colors.white),
                   ),
-                  const SizedBox(height: 8),
-
-                  _buildDispatchRow(
-                    "Parent SMS",
-                    parentSmsStatus,
-                    parentSmsStatus.contains('Delivered') || parentSmsStatus.contains('Dispatched')
-                        ? BadgeStatusType.active
-                        : (parentSmsStatus.contains('Accepted') ? BadgeStatusType.warning : BadgeStatusType.critical),
-                  ),
-                  _buildDispatchRow(
-                    "Hospital SMS",
-                    hospitalSmsStatus,
-                    hasHospPhone && hospitalSent
-                        ? BadgeStatusType.active
-                        : (hasHospPhone && hospitalSmsStatus.contains('Accepted') ? BadgeStatusType.warning : BadgeStatusType.neutral),
-                  ),
-                  _buildDispatchRow(
-                    "Email Alert",
-                    emailSent ? "Dispatched" : "Skipped",
-                    emailSent ? BadgeStatusType.active : BadgeStatusType.neutral,
-                  ),
-                  _buildDispatchRow("Cloud Incident Log", "Saved", BadgeStatusType.active),
-
-                  if (!hasHospPhone) ...[
-                    const SizedBox(height: 12),
-                    Container(
-                      padding: const EdgeInsets.all(12),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFFF59E0B).withValues(alpha: 0.12),
-                        borderRadius: BorderRadius.circular(12),
-                        border: Border.all(color: const Color(0xFFF59E0B).withValues(alpha: 0.35)),
-                      ),
-                      child: const Row(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Icon(Icons.info_outline, size: 18, color: Color(0xFFF59E0B)),
-                          SizedBox(width: 8),
-                          Expanded(
-                            child: Text(
-                              "Facility has no phone number in OpenStreetMap directory. Direct automated hospital SMS was skipped. In actual emergencies, dial 112 directly for ambulance dispatch.",
-                              style: TextStyle(fontFamily: 'Inter', fontSize: 11.5, color: Color(0xFFFDE68A), height: 1.35),
-                            ),
-                          ),
-                        ],
-                      ),
-                    ),
-                  ],
+                  const SizedBox(height: 10),
+                  _buildDispatchRow("Parent SMS", parentSmsStatus, parentSmsStatus == 'Dispatched' || parentSmsStatus == 'Accepted by SMS Gateway' || parentSmsStatus == 'Delivered'),
+                  _buildDispatchRow("Hospital SMS", hospitalSmsStatus, hospitalSmsStatus == 'Dispatched' || hospitalSmsStatus == 'Accepted by SMS Gateway' || hospitalSmsStatus == 'Delivered'),
+                  _buildDispatchRow("Email Notification", emailSent ? "Dispatched" : "Skipped", emailSent),
+                  _buildDispatchRow("Cloud Firestore DB", "Incident Saved", true),
                 ],
               ),
             ),
@@ -663,7 +427,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
     );
   }
 
-  Widget _buildDispatchRow(String channel, String status, BadgeStatusType badgeType) {
+  Widget _buildDispatchRow(String channel, String status, bool isSuccess) {
     return Padding(
       padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
@@ -672,7 +436,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
           Text(channel, style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFF94A3B8))),
           StatusBadge(
             label: status,
-            type: badgeType,
+            type: isSuccess ? BadgeStatusType.active : BadgeStatusType.warning,
           ),
         ],
       ),
@@ -691,19 +455,11 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
     });
   }
 
-  void _showComparisonDialog() {
-    showDialog(
-      context: context,
-      builder: (_) => const EmergencySystemComparisonDialog(),
-    );
-  }
-
   @override
   void dispose() {
     _sensorService.dispose();
     _emergencyPulseController.dispose();
     _countdownTimer?.cancel();
-    _benchmarkTimer?.cancel();
     BuzzerService().stopBuzzer();
     super.dispose();
   }
@@ -937,13 +693,6 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
           icon: const Icon(Icons.arrow_back_ios_new, size: 18),
           onPressed: () => Navigator.pop(context),
         ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.compare_arrows_rounded, color: Color(0xFF38BDF8)),
-            tooltip: "Compare 112 & Built-In Detection",
-            onPressed: _showComparisonDialog,
-          ),
-        ],
       ),
       body: Container(
         height: double.infinity,
@@ -1011,79 +760,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
 
-                // 🌟 Android Screen-Off & Background Execution Advisory
+                // Live G-Force Telemetry Card with smooth dynamic transitions
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 50),
-                  child: Container(
-                    padding: const EdgeInsets.all(14),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF0F172A),
-                      borderRadius: BorderRadius.circular(16),
-                      border: Border.all(color: const Color(0xFF26334D)),
-                    ),
-                    child: Row(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Icon(
-                          _isEngineActive ? Icons.screen_lock_portrait_rounded : Icons.info_outline,
-                          size: 20,
-                          color: _isEngineActive ? const Color(0xFF10B981) : const Color(0xFF38BDF8),
-                        ),
-                        const SizedBox(width: 10),
-                        const Expanded(
-                          child: Column(
-                            crossAxisAlignment: CrossAxisAlignment.start,
-                            children: [
-                              Text(
-                                "Continuous Telematics Notice (Screen-On Required)",
-                                style: TextStyle(
-                                  fontFamily: 'Outfit',
-                                  fontSize: 13,
-                                  fontWeight: FontWeight.bold,
-                                  color: Colors.white,
-                                ),
-                              ),
-                              SizedBox(height: 3),
-                              Text(
-                                "Due to Android OS battery saving architecture, accelerometer sensors halt when the phone screen is powered off. For continuous trip protection, keep the phone display active or placed in a vehicle mount.",
-                                style: TextStyle(
-                                  fontFamily: 'Inter',
-                                  fontSize: 11.5,
-                                  color: Color(0xFF94A3B8),
-                                  height: 1.35,
-                                ),
-                              ),
-                            ],
-                          ),
-                        ),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // 📈 Real-Time 3-Axis (X/Y/Z) Accelerometer Waveform Graph
-                FadeSlideTransition(
-                  delay: const Duration(milliseconds: 70),
-                  child: RealtimeAccelerometerGraph(
-                    buffer: _vectorBuffer,
-                    currentX: _currentX,
-                    currentY: _currentY,
-                    currentZ: _currentZ,
-                    currentMagnitude: _currentForce,
-                    threshold: SensorService.crashThreshold,
-                  ),
-                ),
-                const SizedBox(height: 16),
-
-                // Live G-Force Telemetry Card with Peak Metrics
-                FadeSlideTransition(
-                  delay: const Duration(milliseconds: 90),
+                  delay: const Duration(milliseconds: 80),
                   child: AnimatedContainer(
                     duration: const Duration(milliseconds: 200),
-                    padding: const EdgeInsets.all(20.0),
+                    padding: const EdgeInsets.all(22.0),
                     decoration: BoxDecoration(
                       color: const Color(0xFF161E2E),
                       borderRadius: BorderRadius.circular(20),
@@ -1109,7 +793,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           children: [
                             const Text(
-                              "COMBINED VECTOR ACCELERATION",
+                              "LIVE ACCELERATION VECTOR",
                               style: TextStyle(
                                 fontFamily: 'Outfit',
                                 fontSize: 12,
@@ -1124,7 +808,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                               const StatusBadge(label: "Idle", type: BadgeStatusType.neutral),
                           ],
                         ),
-                        const SizedBox(height: 16),
+                        const SizedBox(height: 18),
                         Row(
                           mainAxisAlignment: MainAxisAlignment.center,
                           crossAxisAlignment: CrossAxisAlignment.baseline,
@@ -1138,7 +822,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                                   val.toStringAsFixed(2),
                                   style: TextStyle(
                                     fontFamily: 'Outfit',
-                                    fontSize: 50,
+                                    fontSize: 54,
                                     fontWeight: FontWeight.w900,
                                     color: val >= SensorService.crashThreshold
                                         ? const Color(0xFFEF4444)
@@ -1162,9 +846,9 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                             ),
                           ],
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 16),
 
-                        // Visual progress bar
+                        // Visual G-force progress bar with smooth tweening
                         ClipRRect(
                           borderRadius: BorderRadius.circular(8),
                           child: TweenAnimationBuilder<double>(
@@ -1186,9 +870,9 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                             },
                           ),
                         ),
-                        const SizedBox(height: 14),
+                        const SizedBox(height: 16),
                         const Divider(height: 1, color: Color(0xFF26334D)),
-                        const SizedBox(height: 12),
+                        const SizedBox(height: 14),
 
                         Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -1198,7 +882,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                               style: const TextStyle(fontFamily: 'Inter', fontSize: 13, color: Color(0xFF94A3B8)),
                             ),
                             Text(
-                              "Threshold: ${SensorService.crashThreshold.toStringAsFixed(1)} m/s²",
+                              "Threshold: ${SensorService.crashThreshold.toStringAsFixed(2)} m/s²",
                               style: const TextStyle(fontFamily: 'Inter', fontSize: 13, fontWeight: FontWeight.bold, color: Color(0xFFFB7185)),
                             ),
                           ],
@@ -1207,11 +891,11 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                     ),
                   ),
                 ),
-                const SizedBox(height: 16),
+                const SizedBox(height: 18),
 
-                // Start/Stop Telematics Engine Toggle
+                // Start/Stop Telematics Engine Toggle with InteractivePressable
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 110),
+                  delay: const Duration(milliseconds: 140),
                   child: InteractivePressable(
                     onTap: _toggleSensorEngine,
                     borderRadius: BorderRadius.circular(16),
@@ -1259,272 +943,38 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                 ),
                 const SizedBox(height: 24),
 
-                // 🔬 SENSOR ACTIVITY TEST RECORDER & BENCHMARKS
+                // Simulation Vectors Card
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 140),
-                  child: Container(
-                    padding: const EdgeInsets.all(18),
-                    decoration: BoxDecoration(
-                      color: const Color(0xFF161E2E),
-                      borderRadius: BorderRadius.circular(20),
-                      border: Border.all(color: const Color(0xFF26334D)),
-                      boxShadow: [
-                        BoxShadow(
-                          color: Colors.black.withValues(alpha: 0.22),
-                          blurRadius: 12,
-                          offset: const Offset(0, 4),
-                        ),
-                      ],
-                    ),
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.stretch,
-                      children: [
-                        Row(
-                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                          children: [
-                            const Row(
-                              children: [
-                                Icon(Icons.timer_outlined, size: 20, color: Color(0xFF38BDF8)),
-                                SizedBox(width: 8),
-                                Text(
-                                  "Sensor Activity Benchmarks",
-                                  style: TextStyle(
-                                    fontFamily: 'Outfit',
-                                    fontSize: 16,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                            if (_benchmarkRecords.isNotEmpty)
-                              GestureDetector(
-                                onTap: _clearBenchmarks,
-                                child: const Text(
-                                  "Clear",
-                                  style: TextStyle(fontFamily: 'Outfit', fontSize: 13, color: Color(0xFFFB7185), fontWeight: FontWeight.bold),
-                                ),
-                              ),
-                          ],
-                        ),
-                        const SizedBox(height: 6),
-                        const Text(
-                          "Select an activity and record live phone acceleration across walking, drop, braking, potholes, and controlled impacts:",
-                          style: TextStyle(fontFamily: 'Inter', fontSize: 12.5, color: Color(0xFF94A3B8)),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Activity selector chips
-                        SingleChildScrollView(
-                          scrollDirection: Axis.horizontal,
-                          child: Row(
-                            children: _benchmarkScenarios.map((sc) {
-                              final isSel = _selectedBenchmarkKey == sc['key'];
-                              return GestureDetector(
-                                onTap: _isRecordingBenchmark
-                                    ? null
-                                    : () {
-                                        setState(() => _selectedBenchmarkKey = sc['key']!);
-                                      },
-                                child: Container(
-                                  margin: const EdgeInsets.only(right: 8),
-                                  padding: const EdgeInsets.symmetric(horizontal: 12, vertical: 7),
-                                  decoration: BoxDecoration(
-                                    color: isSel ? const Color(0xFF38BDF8).withValues(alpha: 0.2) : const Color(0xFF0F172A),
-                                    borderRadius: BorderRadius.circular(10),
-                                    border: Border.all(
-                                      color: isSel ? const Color(0xFF38BDF8) : const Color(0xFF26334D),
-                                    ),
-                                  ),
-                                  child: Text(
-                                    sc['title']!,
-                                    style: TextStyle(
-                                      fontFamily: 'Outfit',
-                                      fontSize: 12.5,
-                                      fontWeight: isSel ? FontWeight.bold : FontWeight.w500,
-                                      color: isSel ? const Color(0xFF38BDF8) : const Color(0xFF94A3B8),
-                                    ),
-                                  ),
-                                ),
-                              );
-                            }).toList(),
-                          ),
-                        ),
-                        const SizedBox(height: 14),
-
-                        // Record Button for Selected Activity
-                        InteractivePressable(
-                          onTap: _isRecordingBenchmark ? null : _startBenchmarkRecording,
-                          borderRadius: BorderRadius.circular(14),
-                          child: Container(
-                            padding: const EdgeInsets.symmetric(vertical: 14),
-                            decoration: BoxDecoration(
-                              gradient: LinearGradient(
-                                colors: _isRecordingBenchmark
-                                    ? [const Color(0xFFF59E0B), const Color(0xFFD97706)]
-                                    : [const Color(0xFF0284C7), const Color(0xFF0369A1)],
-                                begin: Alignment.topLeft,
-                                end: Alignment.bottomRight,
-                              ),
-                              borderRadius: BorderRadius.circular(14),
-                            ),
-                            child: Row(
-                              mainAxisAlignment: MainAxisAlignment.center,
-                              children: [
-                                Icon(
-                                  _isRecordingBenchmark ? Icons.hourglass_top_rounded : Icons.fiber_manual_record_rounded,
-                                  size: 18,
-                                  color: Colors.white,
-                                ),
-                                const SizedBox(width: 8),
-                                Text(
-                                  _isRecordingBenchmark
-                                      ? "Sampling... (${_benchmarkTimerSeconds}s) Move Phone Now"
-                                      : "Record Test: ${_benchmarkScenarios.firstWhere((s) => s['key'] == _selectedBenchmarkKey)['title']}",
-                                  style: const TextStyle(
-                                    fontFamily: 'Outfit',
-                                    fontSize: 14,
-                                    fontWeight: FontWeight.bold,
-                                    color: Colors.white,
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ),
-                        ),
-                        const SizedBox(height: 16),
-
-                        // Benchmark Table / List of All 5 Scenarios
-                        const Text(
-                          "Device Test Results:",
-                          style: TextStyle(fontFamily: 'Outfit', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
-                        ),
-                        const SizedBox(height: 8),
-
-                        ..._benchmarkScenarios.map((sc) {
-                          final rec = _benchmarkRecords[sc['key']];
-                          final hasData = rec != null;
-                          final peakForce = hasData ? (rec['peakForce'] as num).toDouble() : null;
-                          final peakX = hasData ? (rec['peakX'] as num).toDouble() : 0.0;
-                          final peakY = hasData ? (rec['peakY'] as num).toDouble() : 0.0;
-                          final peakZ = hasData ? (rec['peakZ'] as num).toDouble() : 0.0;
-                          final status = hasData ? (rec['status'] ?? 'Safe') : 'Pending Phone Test';
-                          final isTriggered = hasData ? (rec['isTriggered'] == true) : false;
-
-                          return Container(
-                            margin: const EdgeInsets.only(bottom: 8),
-                            padding: const EdgeInsets.all(12),
-                            decoration: BoxDecoration(
-                              color: const Color(0xFF0F172A),
-                              borderRadius: BorderRadius.circular(12),
-                              border: Border.all(
-                                color: hasData
-                                    ? (isTriggered ? const Color(0xFFEF4444).withValues(alpha: 0.5) : const Color(0xFF10B981).withValues(alpha: 0.4))
-                                    : const Color(0xFF1E293B),
-                              ),
-                            ),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      Text(
-                                        sc['title']!,
-                                        style: const TextStyle(fontFamily: 'Outfit', fontSize: 13, fontWeight: FontWeight.bold, color: Colors.white),
-                                      ),
-                                      const SizedBox(height: 2),
-                                      Text(
-                                        "Expected: ${sc['expected']}",
-                                        style: const TextStyle(fontFamily: 'Inter', fontSize: 11, color: Color(0xFF64748B)),
-                                      ),
-                                      if (hasData) ...[
-                                        const SizedBox(height: 3),
-                                        Text(
-                                          "X: ${peakX.toStringAsFixed(1)} | Y: ${peakY.toStringAsFixed(1)} | Z: ${peakZ.toStringAsFixed(1)} m/s² [${rec['timestamp']}]",
-                                          style: const TextStyle(fontFamily: 'Inter', fontSize: 10.5, color: Color(0xFF38BDF8)),
-                                        ),
-                                      ],
-                                    ],
-                                  ),
-                                ),
-                                Column(
-                                  crossAxisAlignment: CrossAxisAlignment.end,
-                                  children: [
-                                    Text(
-                                      hasData ? "${peakForce!.toStringAsFixed(2)} m/s²" : "—",
-                                      style: TextStyle(
-                                        fontFamily: 'Outfit',
-                                        fontSize: 14,
-                                        fontWeight: FontWeight.w900,
-                                        color: hasData
-                                            ? (isTriggered ? const Color(0xFFEF4444) : const Color(0xFF34D399))
-                                            : const Color(0xFF64748B),
-                                      ),
-                                    ),
-                                    const SizedBox(height: 4),
-                                    StatusBadge(
-                                      label: status,
-                                      type: hasData
-                                          ? (isTriggered ? BadgeStatusType.critical : BadgeStatusType.active)
-                                          : BadgeStatusType.neutral,
-                                    ),
-                                  ],
-                                ),
-                              ],
-                            ),
-                          );
-                        }),
-                      ],
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
-                // 🎯 Primary Vector Simulation Cards (Updated X/Y/Z Terminology)
-                FadeSlideTransition(
-                  delay: const Duration(milliseconds: 180),
+                  delay: const Duration(milliseconds: 200),
                   child: Column(
                     children: [
                       const SectionHeader(
-                        title: "Simulate Acceleration Vectors",
-                        subtitle: "Trigger test crash events with multi-axis vector classification",
+                        title: "Simulate Crash Vectors",
+                        subtitle: "Trigger test crash events with full emergency pipeline",
                       ),
                       Row(
                         children: [
                           Expanded(
                             child: _buildCrashTestButton(
-                              label: "X-Axis Vector",
-                              type: "High Severity Primary X-Axis Vector Impact (+X Lateral)",
-                              color: const Color(0xFFEF4444),
+                              label: "Frontal",
+                              type: "High Severity Frontal Collision",
+                              color: const Color(0xFFE11D48),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Expanded(
                             child: _buildCrashTestButton(
-                              label: "Y-Axis Vector",
-                              type: "High Severity Primary Y-Axis Vector Impact (+Y Longitudinal)",
-                              color: const Color(0xFF10B981),
-                            ),
-                          ),
-                        ],
-                      ),
-                      const SizedBox(height: 8),
-                      Row(
-                        children: [
-                          Expanded(
-                            child: _buildCrashTestButton(
-                              label: "Z-Axis Vector",
-                              type: "High Severity Primary Z-Axis Vector Impact (+Z Normal)",
-                              color: const Color(0xFF38BDF8),
-                            ),
-                          ),
-                          const SizedBox(width: 8),
-                          Expanded(
-                            child: _buildCrashTestButton(
-                              label: "Multi-Axis Peak",
-                              type: "High Severity Multi-Axis Force Impact",
+                              label: "Lateral",
+                              type: "High Severity Side Impact (Lateral)",
                               color: const Color(0xFFF59E0B),
+                            ),
+                          ),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            child: _buildCrashTestButton(
+                              label: "Rollover",
+                              type: "High Severity Rollover Force",
+                              color: const Color(0xFF8B5CF6),
                             ),
                           ),
                         ],
@@ -1534,50 +984,9 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                 ),
                 const SizedBox(height: 24),
 
-                // ⚖️ Comparison Action Button
-                FadeSlideTransition(
-                  delay: const Duration(milliseconds: 200),
-                  child: InteractivePressable(
-                    onTap: _showComparisonDialog,
-                    borderRadius: BorderRadius.circular(14),
-                    child: Container(
-                      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
-                      decoration: BoxDecoration(
-                        color: const Color(0xFF161E2E),
-                        borderRadius: BorderRadius.circular(14),
-                        border: Border.all(color: const Color(0xFF26334D)),
-                      ),
-                      child: const Row(
-                        children: [
-                          Icon(Icons.compare_arrows_rounded, color: Color(0xFF38BDF8), size: 22),
-                          SizedBox(width: 12),
-                          Expanded(
-                            child: Column(
-                              crossAxisAlignment: CrossAxisAlignment.start,
-                              children: [
-                                Text(
-                                  "Emergency System Comparison",
-                                  style: TextStyle(fontFamily: 'Outfit', fontWeight: FontWeight.bold, fontSize: 14, color: Colors.white),
-                                ),
-                                SizedBox(height: 2),
-                                Text(
-                                  "Compare Accident Guard with Built-In Phone Detection & India 112",
-                                  style: TextStyle(fontFamily: 'Inter', fontSize: 11.5, color: Color(0xFF94A3B8)),
-                                ),
-                              ],
-                            ),
-                          ),
-                          Icon(Icons.arrow_forward_ios, size: 14, color: Color(0xFF64748B)),
-                        ],
-                      ),
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 24),
-
                 // Audit Logs Console
                 FadeSlideTransition(
-                  delay: const Duration(milliseconds: 220),
+                  delay: const Duration(milliseconds: 260),
                   child: Column(
                     children: [
                       const SectionHeader(
