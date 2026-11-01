@@ -2,67 +2,25 @@
 
 > **Smart Accident Detection and Emergency Alert System**
 
-## 📄 Abstract
-
-Accident Guard is a cross-platform telematics and emergency dispatch system developed using Flutter for Android devices. The system utilizes smartphone tri-axial accelerometer streams to continuously monitor vehicle acceleration vectors ($a_x, a_y, a_z$) and combined magnitude ($|\vec{a}| = \sqrt{a_x^2 + a_y^2 + a_z^2}$). Upon detecting acceleration exceeding the validated collision threshold of $35.0\text{ m/s}^2$, the application immediately triggers an audible alarm buzzer and initiates a 30-second safety countdown, allowing uninjured drivers to cancel false alarms via an interactive override. If uncancelled, the autonomous alert pipeline resolves current GPS coordinates with five-decimal precision, queries OpenStreetMap directory servers to identify the three nearest medical facilities and their driving distances, and dispatches multi-channel SOS alerts. Notifications including exact Google Maps location links and critical driver medical data, such as blood group, are transmitted concurrently via Android Native SIM SMS, TextBee HTTP SMS Gateway, and direct SMTP email. Due to standard Android battery management restrictions, continuous real-time accelerometer stream sampling operates while the application is active in the foreground with the screen on, providing an accessible, software-driven life-safety supplementary tool.
+**Accident Guard** is a cross-platform Flutter application engineered for **Smart Accident Detection and Emergency Alert System**. It detects vehicular collisions using real-time accelerometer telemetry, activates a 30-second driver safety countdown with an audio buzzer, computes the nearest medical emergency facility via GPS, and autonomously dispatches multi-channel SOS alerts (Direct SIM SMS, TextBee SMS Gateway, and Email) with exact Google Maps coordinates and critical driver medical data.
 
 ---
 
 ## ✨ Key Features
 
-- ⚡ **Real-Time 3-Axis Impact Telemetry**: Continuously streams and graphs $a_x$, $a_y$, $a_z$, and total magnitude vectors ($\ge 35.0\text{ m/s}^2$ trigger threshold).
-- ⏱️ **Safety Countdown & False-Alarm Override**: Triggers a 30-second audio alarm buzzer allowing drivers to cancel accidental dispatches before alerts are transmitted.
-- 🔬 **Activity Test & Calibration Recorder**: Built-in benchmark recorder for measuring real-world phone sensor results across walking, safe phone-drop, simulated braking, simulated potholes, and controlled impacts.
-- 🏥 **Nearest Hospital Geocoding (OpenStreetMap)**: Automatically computes distances to registered trauma centers and emergency hubs using high-precision GPS.
+- ⚡ **Real-Time Impact Telemetry**: Continuously tracks linear acceleration and G-force vectors using device sensors ($\ge 35.0\text{ m/s}^2$ trigger threshold).
+- ⏱️ **Safety Countdown & False-Alarm Override**: Triggers a 30-second audio alarm allowing safe drivers to cancel accidental dispatches before alerts are transmitted.
+- 🏥 **Nearest Hospital Geocoding**: Automatically calculates distance to registered trauma centers and emergency hubs using high-precision GPS.
 - 📡 **Multi-Channel SOS Alerts**:
-  - **Direct Device SIM SMS**: Hardware-level native SMS dispatch via Android platform channels (`SmsManager`).
-  - **TextBee HTTP SMS Gateway**: REST API gateway fallback for background SMS delivery.
+  - **Direct Device SIM SMS**: Hardware-level native SMS dispatch via Android platform channels.
+  - **TextBee & Cloud SMS Gateways**: REST API-based fallback for instantaneous SMS delivery.
   - **SMTP Emergency Email**: Dispatches structured email notifications to emergency contacts.
-  - **Google Maps Navigation**: Direct routing coordinates sent to responders for zero-delay navigation.
+  - **Google Maps Integration**: Direct routing link sent to responders for zero-delay navigation.
 - 👥 **Multi-Role Portals**:
-  - **🚗 Driver Portal**: Live sensor telemetry, real-time X/Y/Z waveform graph, activity recorder, and alert configuration.
+  - **🚗 Driver Portal**: Live sensor telemetry, manual emergency SOS trigger, engine killswitch status, and profile management.
   - **🏥 Hospital Hub**: Live feed of incoming crash dispatches, patient blood group, contact details, and route navigation.
   - **🛡️ Admin Console**: Complete system-wide overview of active drivers, registered hospitals, crash history, and engine state diagnostics.
-
----
-
-## ⚖️ Factual System Comparison
-
-A concise, factual comparison between **Accident Guard**, **Built-in Smartphone Crash Detection** (Apple / Google Pixel), and **India's 112 Emergency System** (ERSS):
-
-| Evaluation Metric | Built-in Crash Detection (Apple / Pixel) | India 112 Emergency System (ERSS) | Accident Guard System |
-|---|---|---|---|
-| **Collision Detection Mechanism** | Proprietary multi-sensor fusion (256G accelerometer, HDR gyro, barometer pressure drop, microphone cabin sound). | None on mobile phone. Relies on human voice calls, SMS, or vehicle-mounted AIS-140 GPS tracker panic buttons. | Device-agnostic 3-axis linear accelerometer vector telemetry ($a_x, a_y, a_z$) with a validated $\ge 35.0\text{ m/s}^2$ threshold. |
-| **Supported Hardware** | Restricted to high-end flagship smartphones (iPhone 14+, Pixel 3+). | Any mobile phone, landline, or cellular telematics module. | Standard Android smartphones running Flutter. |
-| **Primary Notification Channel** | Automated voice call to local Public Safety Answering Point (911/112). | Public Safety Answering Point (PSAP) dispatches local police PCR van or 108 ambulance. | Concurrent Direct Native SIM SMS, TextBee HTTP SMS Gateway, and SMTP Email to personal family contacts. |
-| **Driver Medical Data Transfer** | Displays Medical ID on phone lock screen. | Transmitted verbally by caller to 112 operator. | Automatically embeds driver blood group and personal data in digital SMS and email alerts. |
-| **Hospital Geocoding** | Not included (transfers to government emergency operator). | Handled by government 108 medical dispatch centre. | Live OpenStreetMap (OSM) spatial geocoding of top 3 nearest trauma facilities with driving distances. |
-| **Screen-Off Operation** | Runs 24/7 at low power via dedicated OS-privileged sensor co-processor. | Not applicable (manual call / external vehicle unit). | Requires screen on / app in foreground due to standard Android battery management limits on sensor listeners. |
-| **End-User Cost** | Tied to premium hardware ($800+). | Free public government emergency service. | Free, open-source software deployable on any Android phone. |
-
----
-
-## 📱 Android Background & Screen-Off Telematics
-
-- **Foreground Execution (Screen On)**: The application continuously listens to device accelerometer streams at full frequency and renders real-time X/Y/Z telemetry waveforms.
-- **Screen-Off Behavior**: Standard Android OS battery optimization (Doze mode) suspends third-party accelerometer event streams when the phone display is turned off or locked. To maintain continuous crash monitoring during transit, the phone display must remain active or be mounted on a vehicle charger.
-- **Dispatch Reliability**: Pre-fetching GPS fixes and executing concurrent multi-channel SMS/Email broadcasts operate reliably as asynchronous platform tasks.
-
----
-
-## 🔬 Sensor Benchmarks & Activity Scenarios
-
-Accident Guard includes an interactive on-device test recorder for validating sensor behavior across common scenarios:
-
-| Activity Scenario | Typical Acceleration | Expected System Behavior | Verified Outcome |
-|---|---|---|---|
-| **Walking** | $1.5\text{ – }4.5\text{ m/s}^2$ | Sub-threshold (Safe) | No countdown or false alarm triggered |
-| **Safe Phone-Drop (Bed/Sofa)** | $15.0\text{ – }28.0\text{ m/s}^2$ | Sub-threshold (Safe) | Below $35\text{ m/s}^2$ threshold; no false alarm |
-| **Simulated Braking** | $8.0\text{ – }18.0\text{ m/s}^2$ | Sub-threshold (Safe) | Longitudinal jerk absorbed without trigger |
-| **Simulated Pothole** | $12.0\text{ – }24.0\text{ m/s}^2$ | Sub-threshold (Safe) | Vertical spike filtered as sub-threshold |
-| **Controlled Impact** | $\ge 35.0\text{ m/s}^2$ | Threshold Exceeded | Triggers 30s buzzer & safety countdown |
-
-*Note: Sensor recordings must be captured on physical Android hardware using the in-app benchmark recorder.*
+- 🔄 **Hybrid Online / Offline Architecture**: Seamless Cloud Firestore integration with automatic local fallback using `shared_preferences`.
 
 ---
 
@@ -110,7 +68,43 @@ accident-guard/
 
 ---
 
+## 🚀 Getting Started
+
+### Prerequisites
+- [Flutter SDK](https://docs.flutter.dev/get-started/install) (`^3.12.2` or later)
+- [Android Studio](https://developer.android.com/studio) or VS Code with Flutter extension
+- Connected Android/iOS device or Chrome browser
+
+### Installation & Run
+
+1. **Clone the repository:**
+   ```bash
+   git clone https://github.com/your-username/accident-guard.git
+   cd accident-guard
+   ```
+
+2. **Install dependencies:**
+   ```bash
+   flutter pub get
+   ```
+
+3. **Run the application:**
+   ```bash
+   # Run in Chrome
+   flutter run -d chrome
+
+   # Run on connected Android device
+   flutter run -d android
+
+   # Run as a local web server
+   flutter run -d web-server --web-port=8080 --web-hostname=127.0.0.1
+   ```
+
+---
+
 ## 🔑 Demo & Test Accounts
+
+You can test all roles immediately without setting up external backends:
 
 | Role | Email | Password |
 |---|---|---|
@@ -121,10 +115,30 @@ accident-guard/
 
 ---
 
-## 📦 Building Android APK
+## ⚙️ Configuration
 
+### SMS Gateway (TextBee / Twilio / SIM)
+1. Log in to the **Driver Portal** or open **Settings** in the Control Panel.
+2. Under **SMS Dispatch Settings**, configure your preferred method:
+   - **Native Device SIM**: Dispatches directly via your device's active carrier SIM (requires Android SMS permission).
+   - **TextBee Gateway**: Enter your TextBee API Key and Device ID for automated background SMS.
+   - **Twilio**: Input your Account SID, Auth Token, and Twilio phone number.
+
+### Emergency Email (SMTP)
+Configure SMTP settings in `alert_service.dart` or via the Driver Control Panel to send automated email notifications to emergency contacts.
+
+---
+
+## 📦 Building for Production
+
+### Android APK
 ```bash
-flutter build apk --debug
+flutter build apk --release
 ```
-The output APK is generated at:
-`build/app/outputs/flutter-apk/app-debug.apk`
+The generated APK will be available at:
+`build/app/outputs/flutter-apk/app-release.apk`
+
+### Web Deployment
+```bash
+flutter build web --release
+```
