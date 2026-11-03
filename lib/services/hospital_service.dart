@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'dart:developer' as developer;
 import 'dart:math';
 import 'package:http/http.dart' as http;
+import 'database_service.dart';
 
 enum HospitalLookupStatus {
   success,
@@ -468,6 +469,22 @@ class HospitalService {
       name: 'HospitalService',
     );
 
+    // 4. Fallback to local offline cached hospitals if server query returned empty
+    if (allFacilities.isEmpty) {
+      final cached = await getCachedHospitals(latitude: latitude, longitude: longitude);
+      if (cached.isNotEmpty) {
+        developer.log('Offline mode: Using ${cached.length} cached regional hospitals.', name: 'HospitalService');
+        return HospitalSearchResult(
+          hospitals: cached,
+          status: HospitalLookupStatus.success,
+          statusMessage: 'Loaded from Offline Hospital Cache',
+          discoveredCount: cached.length,
+          radiusMeters: usedRadius,
+          activeEndpoint: 'Offline Local Storage (Cached)',
+        );
+      }
+    }
+
     if (allFacilities.isEmpty) {
       HospitalLookupStatus status;
       String message;
@@ -495,6 +512,7 @@ class HospitalService {
     }
 
     final top3 = prioritizeHospitals(allFacilities);
+    _cacheDiscoveredHospitals(top3);
 
     developer.log('Final prioritized top ${top3.length} hospitals:', name: 'HospitalService');
     for (int i = 0; i < top3.length; i++) {
@@ -536,6 +554,52 @@ class HospitalService {
       longitude: longitude,
     );
     return result.hospitals;
+  }
+
+  /// Retrieve cached regional hospitals when offline
+  static Future<List<HospitalModel>> getCachedHospitals({
+    required double latitude,
+    required double longitude,
+  }) async {
+    try {
+      final db = DatabaseService();
+      final cached = await db.getOfflineHospitalCache();
+      if (cached.isEmpty) return [];
+
+      final List<HospitalModel> models = [];
+      for (var item in cached) {
+        final lat = (item['latitude'] as num?)?.toDouble() ?? 0.0;
+        final lng = (item['longitude'] as num?)?.toDouble() ?? 0.0;
+        final dist = calculateHaversineDistanceKm(latitude, longitude, lat, lng);
+        models.add(HospitalModel(
+          name: (item['facilityName'] ?? item['name'] ?? 'Emergency Facility').toString(),
+          latitude: lat,
+          longitude: lng,
+          distanceKm: dist,
+          address: item['address']?.toString(),
+          phone: item['phone']?.toString() ?? item['dispatchPhone']?.toString(),
+          email: item['email']?.toString(),
+          website: item['website']?.toString(),
+          facilityType: (item['facilityType'] ?? 'Emergency Hospital').toString(),
+          emergencyCapability: (item['emergencyCapability'] ?? 'Yes').toString(),
+          ownership: (item['ownership'] ?? 'Available').toString(),
+          priorityTier: 1,
+          source: 'Cached Local Storage',
+        ));
+      }
+      models.sort((a, b) => a.distanceKm.compareTo(b.distanceKm));
+      return models.take(3).toList();
+    } catch (_) {
+      return [];
+    }
+  }
+
+  static Future<void> _cacheDiscoveredHospitals(List<HospitalModel> hospitals) async {
+    try {
+      final db = DatabaseService();
+      final list = hospitals.map((h) => h.toMap()).toList();
+      await db.saveOfflineHospitalCache(list);
+    } catch (_) {}
   }
 
   /// Query OpenStreetMap for nearest hospital with auto-retry at larger radius

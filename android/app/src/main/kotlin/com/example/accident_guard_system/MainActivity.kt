@@ -56,6 +56,18 @@ class MainActivity : FlutterActivity() {
                 } else {
                     result.error("INVALID_ARGUMENTS", "Phone number or message was null", null)
                 }
+            } else if (call.method == "getTelephonyStatus") {
+                val tm = getSystemService(android.content.Context.TELEPHONY_SERVICE) as? android.telephony.TelephonyManager
+                val simState = tm?.simState ?: android.telephony.TelephonyManager.SIM_STATE_UNKNOWN
+                val hasSim = (simState == android.telephony.TelephonyManager.SIM_STATE_READY)
+                val carrier = if (!tm?.networkOperatorName.isNullOrEmpty()) tm?.networkOperatorName else "Cellular Network"
+                val isSmsCapable = packageManager.hasSystemFeature(PackageManager.FEATURE_TELEPHONY)
+                result.success(mapOf(
+                    "hasSim" to hasSim,
+                    "simState" to (if (hasSim) "READY" else "NO_SERVICE"),
+                    "carrierName" to carrier,
+                    "isSmsCapable" to isSmsCapable
+                ))
             } else {
                 result.notImplemented()
             }

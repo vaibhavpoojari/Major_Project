@@ -1,9 +1,15 @@
 import 'package:flutter/material.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 import 'sensor_monitoring.dart';
+import 'emergency_contacts_screen.dart';
+import 'accident_history_screen.dart';
+import 'emergency_profile_screen.dart';
+import 'offline_map_screen.dart';
 import '../services/alert_service.dart';
 import '../services/database_service.dart';
+import '../services/localization_service.dart';
 import '../widgets/emergency_ui_components.dart';
+import '../widgets/health_monitor_widget.dart';
 import 'login_screen.dart';
 
 class ControlPanel extends StatefulWidget {
@@ -25,12 +31,13 @@ class _ControlPanelState extends State<ControlPanel> {
 
   bool _isEmailConfigured = false;
   bool _isTextbeeConfigured = false;
+  int _countdownDuration = 20;
 
   Map<String, dynamic> get _driverProfile => _dbService.activeSessionUser ?? {
-    'fullName': 'John Doe (Demo)',
-    'email': 'driver@test.com',
+    'fullName': 'Prakyath',
+    'email': 'shettyprakyathp@gmail.com',
     'bloodGroup': 'O+',
-    'parentPhone': '+15005550006',
+    'parentPhone': '+919113895413',
   };
 
   @override
@@ -49,6 +56,8 @@ class _ControlPanelState extends State<ControlPanel> {
     final smtpEmail = prefs.getString('smtp_email') ?? DatabaseService.defaultSmtpEmail;
     final smtpPassword = prefs.getString('smtp_password') ?? DatabaseService.defaultSmtpPassword;
 
+    final countdown = prefs.getInt('sos_countdown_duration') ?? 20;
+
     if (mounted) {
       setState(() {
         _emailUrlController.text = emailUrl;
@@ -58,8 +67,17 @@ class _ControlPanelState extends State<ControlPanel> {
         _smtpPasswordController.text = smtpPassword;
         _isTextbeeConfigured = _textbeeApiKeyController.text.trim().isNotEmpty;
         _isEmailConfigured = _smtpEmailController.text.trim().isNotEmpty || emailUrl.trim().isNotEmpty;
+        _countdownDuration = (countdown >= 15 && countdown <= 30) ? countdown : 20;
       });
     }
+  }
+
+  void _updateCountdownDuration(int seconds) async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('sos_countdown_duration', seconds);
+    setState(() {
+      _countdownDuration = seconds;
+    });
   }
 
   @override
@@ -117,23 +135,26 @@ class _ControlPanelState extends State<ControlPanel> {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(
-      appBar: AppBar(
-        title: const Row(
-          children: [
-            Icon(Icons.security, size: 22, color: Color(0xFFE11D48)),
-            SizedBox(width: 10),
-            Text("Driver Safety Console"),
-          ],
-        ),
-        actions: [
-          IconButton(
-            icon: const Icon(Icons.logout, color: Colors.white70),
-            onPressed: _logout,
-            tooltip: "Sign Out",
-          )
-        ],
-      ),
+    return ValueListenableBuilder<AppLanguage>(
+      valueListenable: AppLocalization.languageNotifier,
+      builder: (context, currentLang, _) {
+        return Scaffold(
+          appBar: AppBar(
+            title: Row(
+              children: [
+                const Icon(Icons.security, size: 22, color: Color(0xFFE11D48)),
+                const SizedBox(width: 10),
+                Text('driver_hub'.tr),
+              ],
+            ),
+            actions: [
+              IconButton(
+                icon: const Icon(Icons.logout, color: Colors.white70),
+                onPressed: _logout,
+                tooltip: "Sign Out",
+              )
+            ],
+          ),
       body: Container(
         height: double.infinity,
         decoration: const BoxDecoration(
@@ -328,6 +349,13 @@ class _ControlPanelState extends State<ControlPanel> {
                 ),
                 const SizedBox(height: 24),
 
+                // Feature 6: Compact System Health Monitor
+                const FadeSlideTransition(
+                  delay: Duration(milliseconds: 100),
+                  child: HealthMonitorWidget(),
+                ),
+                const SizedBox(height: 24),
+
                 // Primary CTA: Launch Telematics & Accident Detection (Heartbeat Animated Pulse Card)
                 FadeSlideTransition(
                   delay: const Duration(milliseconds: 140),
@@ -389,6 +417,230 @@ class _ControlPanelState extends State<ControlPanel> {
                           Icon(Icons.arrow_forward_ios, color: Colors.white70, size: 18),
                         ],
                       ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Feature Hub: Emergency Contacts, Accident History & Emergency Profile Navigation
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 170),
+                  child: Column(
+                    children: [
+                      SectionHeader(
+                        title: 'driver_hub'.tr,
+                        subtitle: "Manage emergency contacts, accident history & driver profile",
+                      ),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildNavigationCard(
+                              icon: Icons.contact_phone_outlined,
+                              iconColor: const Color(0xFF38BDF8),
+                              title: 'emergency_contacts'.tr,
+                              subtitle: 'emergency_contacts_desc'.tr,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => EmergencyContactsScreen(
+                                    driverEmail: _driverProfile['email'] ?? 'driver@guard.com',
+                                  ),
+                                ),
+                              ).then((_) => _loadConfigs()),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildNavigationCard(
+                              icon: Icons.history_rounded,
+                              iconColor: const Color(0xFFF59E0B),
+                              title: 'accident_history'.tr,
+                              subtitle: 'accident_history_desc'.tr,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const AccidentHistoryScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        children: [
+                          Expanded(
+                            child: _buildNavigationCard(
+                              icon: Icons.medical_services_outlined,
+                              iconColor: const Color(0xFFFB7185),
+                              title: 'emergency_profile'.tr,
+                              subtitle: 'emergency_profile_desc'.tr,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => EmergencyProfileScreen(
+                                    driverEmail: _driverProfile['email'] ?? 'driver@guard.com',
+                                  ),
+                                ),
+                              ).then((_) => _loadConfigs()),
+                            ),
+                          ),
+                          const SizedBox(width: 12),
+                          Expanded(
+                            child: _buildNavigationCard(
+                              icon: Icons.map_outlined,
+                              iconColor: const Color(0xFF10B981),
+                              title: 'offline_maps'.tr,
+                              subtitle: 'offline_maps_desc'.tr,
+                              onTap: () => Navigator.push(
+                                context,
+                                MaterialPageRoute(
+                                  builder: (_) => const OfflineMapScreen(),
+                                ),
+                              ),
+                            ),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(height: 24),
+
+                // Feature 7 & Feature 1: System Settings (Language & Countdown Duration)
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 190),
+                  child: Container(
+                    padding: const EdgeInsets.all(20),
+                    decoration: BoxDecoration(
+                      color: const Color(0xFF161E2E),
+                      borderRadius: BorderRadius.circular(20),
+                      border: Border.all(color: const Color(0xFF26334D)),
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.2),
+                          blurRadius: 10,
+                          offset: const Offset(0, 4),
+                        ),
+                      ],
+                    ),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.stretch,
+                      children: [
+                        Row(
+                          children: [
+                            const Icon(Icons.tune_rounded, size: 20, color: Color(0xFF38BDF8)),
+                            const SizedBox(width: 8),
+                            Text(
+                              'settings'.tr,
+                              style: const TextStyle(
+                                fontFamily: 'Outfit',
+                                fontSize: 16,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.white,
+                              ),
+                            ),
+                          ],
+                        ),
+                        const SizedBox(height: 16),
+
+                        // Language Selection Toggle
+                        Row(
+                          children: [
+                            Expanded(
+                              child: Column(
+                                crossAxisAlignment: CrossAxisAlignment.start,
+                                children: [
+                                  Text(
+                                    'language'.tr,
+                                    style: const TextStyle(
+                                      fontFamily: 'Outfit',
+                                      fontSize: 14,
+                                      fontWeight: FontWeight.bold,
+                                      color: Colors.white,
+                                    ),
+                                  ),
+                                  const SizedBox(height: 2),
+                                  Text(
+                                    'language_select'.tr,
+                                    style: const TextStyle(fontFamily: 'Inter', fontSize: 12, color: Color(0xFF94A3B8)),
+                                  ),
+                                ],
+                              ),
+                            ),
+                            Container(
+                              decoration: BoxDecoration(
+                                color: const Color(0xFF0F172A),
+                                borderRadius: BorderRadius.circular(12),
+                                border: Border.all(color: const Color(0xFF334155)),
+                              ),
+                              child: Row(
+                                children: [
+                                  _buildLanguageButton(AppLanguage.english),
+                                  _buildLanguageButton(AppLanguage.kannada),
+                                  _buildLanguageButton(AppLanguage.hindi),
+                                ],
+                              ),
+                            ),
+                          ],
+                        ),
+                        const Divider(height: 28, color: Color(0xFF26334D)),
+
+                        // Configurable Countdown Duration Slider (15 - 30 seconds)
+                        Row(
+                          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                          children: [
+                            Column(
+                              crossAxisAlignment: CrossAxisAlignment.start,
+                              children: [
+                                Text(
+                                  'countdown_duration'.tr,
+                                  style: const TextStyle(
+                                    fontFamily: 'Outfit',
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.bold,
+                                    color: Colors.white,
+                                  ),
+                                ),
+                                const SizedBox(height: 2),
+                                const Text(
+                                  "15 - 30s override timer",
+                                  style: TextStyle(fontFamily: 'Inter', fontSize: 12, color: Color(0xFF94A3B8)),
+                                ),
+                              ],
+                            ),
+                            Container(
+                              padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 4),
+                              decoration: BoxDecoration(
+                                color: const Color(0xFFE11D48).withValues(alpha: 0.2),
+                                borderRadius: BorderRadius.circular(8),
+                                border: Border.all(color: const Color(0xFFE11D48).withValues(alpha: 0.5)),
+                              ),
+                              child: Text(
+                                "$_countdownDuration s",
+                                style: const TextStyle(
+                                  fontFamily: 'Outfit',
+                                  fontSize: 14,
+                                  fontWeight: FontWeight.bold,
+                                  color: Color(0xFFFB7185),
+                                ),
+                              ),
+                            ),
+                          ],
+                        ),
+                        Slider(
+                          value: _countdownDuration.toDouble(),
+                          min: 15.0,
+                          max: 30.0,
+                          divisions: 15,
+                          label: "$_countdownDuration s",
+                          activeColor: const Color(0xFFE11D48),
+                          inactiveColor: const Color(0xFF334155),
+                          onChanged: (val) {
+                            _updateCountdownDuration(val.round());
+                          },
+                        ),
+                      ],
                     ),
                   ),
                 ),
@@ -694,7 +946,9 @@ class _ControlPanelState extends State<ControlPanel> {
         ),
       ),
     );
-  }
+  },
+);
+}
 
   Widget _buildMatrixTile({
     required String title,
@@ -940,6 +1194,99 @@ class _ControlPanelState extends State<ControlPanel> {
             child: const Text("Close", style: TextStyle(color: Color(0xFF38BDF8))),
           )
         ],
+      ),
+    );
+  }
+
+  Widget _buildNavigationCard({
+    required IconData icon,
+    required Color iconColor,
+    required String title,
+    required String subtitle,
+    required VoidCallback onTap,
+  }) {
+    return InteractivePressable(
+      onTap: onTap,
+      borderRadius: BorderRadius.circular(16),
+      child: Container(
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFF161E2E),
+          borderRadius: BorderRadius.circular(16),
+          border: Border.all(color: const Color(0xFF26334D)),
+          boxShadow: [
+            BoxShadow(
+              color: Colors.black.withValues(alpha: 0.18),
+              blurRadius: 8,
+              offset: const Offset(0, 3),
+            ),
+          ],
+        ),
+        child: Row(
+          children: [
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: iconColor.withValues(alpha: 0.15),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: Icon(icon, color: iconColor, size: 22),
+            ),
+            const SizedBox(width: 14),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    title,
+                    style: const TextStyle(
+                      fontFamily: 'Outfit',
+                      fontSize: 14.5,
+                      fontWeight: FontWeight.bold,
+                      color: Colors.white,
+                    ),
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    subtitle,
+                    style: const TextStyle(
+                      fontFamily: 'Inter',
+                      fontSize: 11,
+                      color: Color(0xFF94A3B8),
+                    ),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                  ),
+                ],
+              ),
+            ),
+            const Icon(Icons.arrow_forward_ios, color: Color(0xFF64748B), size: 14),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildLanguageButton(AppLanguage lang) {
+    final bool isSelected = AppLocalization.currentLanguage == lang;
+    return GestureDetector(
+      onTap: () => AppLocalization.setLanguage(lang),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 14, vertical: 8),
+        decoration: BoxDecoration(
+          color: isSelected ? const Color(0xFF38BDF8) : Colors.transparent,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: Text(
+          lang.displayName,
+          style: TextStyle(
+            fontFamily: 'Outfit',
+            fontSize: 12.5,
+            fontWeight: FontWeight.bold,
+            color: isSelected ? const Color(0xFF0F172A) : Colors.white70,
+          ),
+        ),
       ),
     );
   }

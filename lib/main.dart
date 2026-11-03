@@ -3,12 +3,14 @@ import 'package:flutter/cupertino.dart';
 import 'package:firebase_core/firebase_core.dart';
 import 'screens/login_screen.dart';
 import 'services/database_service.dart';
+import 'services/localization_service.dart';
 
 void main() async {
   WidgetsFlutterBinding.ensureInitialized();
 
-  // Initialize Local Mock DB / Session Persistence
+  // Initialize Local Mock DB / Session Persistence & Localization
   await DatabaseService.init();
+  await AppLocalization.init();
 
   // Robust initialization of Firebase
   try {

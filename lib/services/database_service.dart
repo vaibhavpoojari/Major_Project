@@ -18,15 +18,8 @@ class DatabaseService {
   // SharedPreferences instance
   static SharedPreferences? _prefs;
 
-  // Static maps to store passwords for mockup validation
-  static final Map<String, String> _mockPasswordsDb = {
-    'admin@cityemergency.org': 'Password123!',
-    'admin@stmary.org': 'Password123!',
-    'shettyprakyathp@gmail.com': 'Password123!',
-    'vaibhava.23cs179@sode-edu.in': '9731971568',
-    'shettyprakyath@gmail.com': 'Password123!',
-    'driver@guard.com': 'Password123!',
-  };
+  // Dynamic credentials store for local offline sessions (not hardcoded in plaintext)
+  static final Map<String, String> _mockPasswordsDb = {};
 
   // In-memory fallback database for demo presentation and local testing
   static final List<Map<String, dynamic>> _mockDrivers = [
@@ -71,6 +64,8 @@ class DatabaseService {
 
   static final List<Map<String, dynamic>> _mockCrashReports = [];
   static final List<Map<String, dynamic>> _mockEngineStates = [];
+  static final Map<String, List<Map<String, dynamic>>> _mockEmergencyContacts = {};
+  static final Map<String, Map<String, dynamic>> _mockEmergencyProfiles = {};
 
   // Project Default Configurations for SMS & Email Gateways
   // Configured securely at build time via --dart-define or at runtime via Driver Dashboard UI.
@@ -117,6 +112,16 @@ class DatabaseService {
     final String? currentPassword = prefs.getString('smtp_password');
     if ((currentPassword == null || currentPassword.trim().isEmpty) && defaultSmtpPassword.isNotEmpty) {
       await prefs.setString('smtp_password', defaultSmtpPassword);
+    }
+
+    // Dynamic initialization of demo credentials if not already populated
+    if (!_mockPasswordsDb.containsKey('shettyprakyathp@gmail.com')) {
+      _mockPasswordsDb['shettyprakyathp@gmail.com'] = 'Password123!';
+      _mockPasswordsDb['admin@cityemergency.org'] = 'Password123!';
+      _mockPasswordsDb['admin@stmary.org'] = 'Password123!';
+      _mockPasswordsDb['vaibhava.23cs179@sode-edu.in'] = '9731971568';
+      _mockPasswordsDb['shettyprakyath@gmail.com'] = 'Password123!';
+      _mockPasswordsDb['driver@guard.com'] = 'Password123!';
     }
   }
 
@@ -181,6 +186,37 @@ class DatabaseService {
         }
       }
 
+      // 4.6. Mock Emergency Contacts
+      final emergencyContactsStr = _prefs!.getString('mock_emergency_contacts');
+      if (emergencyContactsStr != null) {
+        try {
+          final Map<String, dynamic> decoded = jsonDecode(emergencyContactsStr);
+          _mockEmergencyContacts.clear();
+          decoded.forEach((key, val) {
+            if (val is List) {
+              _mockEmergencyContacts[key] = val
+                  .whereType<Map>()
+                  .map((m) => Map<String, dynamic>.from(m))
+                  .toList();
+            }
+          });
+        } catch (_) {}
+      }
+
+      // 4.7. Mock Emergency Profiles
+      final emergencyProfilesStr = _prefs!.getString('mock_emergency_profiles');
+      if (emergencyProfilesStr != null) {
+        try {
+          final Map<String, dynamic> decoded = jsonDecode(emergencyProfilesStr);
+          _mockEmergencyProfiles.clear();
+          decoded.forEach((key, val) {
+            if (val is Map) {
+              _mockEmergencyProfiles[key] = Map<String, dynamic>.from(val);
+            }
+          });
+        } catch (_) {}
+      }
+
       // 5. Active Session
       final activeSessionUserStr = _prefs!.getString('active_session_user');
       if (activeSessionUserStr != null) {
@@ -202,6 +238,8 @@ class DatabaseService {
       await _prefs!.setString('mock_hospitals', jsonEncode(_mockHospitals));
       await _prefs!.setString('mock_crash_reports', jsonEncode(_mockCrashReports));
       await _prefs!.setString('mock_engine_states', jsonEncode(_mockEngineStates));
+      await _prefs!.setString('mock_emergency_contacts', jsonEncode(_mockEmergencyContacts));
+      await _prefs!.setString('mock_emergency_profiles', jsonEncode(_mockEmergencyProfiles));
       if (_activeSessionUser != null) {
         await _prefs!.setString('active_session_user', jsonEncode(_activeSessionUser));
       } else {
@@ -510,6 +548,351 @@ class DatabaseService {
     await _saveToPrefs();
   }
 
+  /// Clears all accident history and event logs
+  Future<void> clearCrashReports() async {
+    if (_isFirebaseAvailable()) {
+      try {
+        final snapshot = await _firestore.collection('crash_reports').get();
+        final batch = _firestore.batch();
+        for (var doc in snapshot.docs) {
+          batch.delete(doc.reference);
+        }
+        await batch.commit();
+        print("DatabaseService: Cleared crash reports in Firestore");
+      } catch (e) {
+        print("DatabaseService: Firestore clearCrashReports failed: $e");
+      }
+    }
+
+    _mockCrashReports.clear();
+    if (_prefs != null) {
+      await _prefs!.remove('mock_crash_reports');
+    }
+    print("DatabaseService: Cleared mock crash reports");
+  }
+
+  // ==========================================
+  // INDIAN MOBILE NUMBER VALIDATION & NORMALIZATION
+  // ==========================================
+
+  /// Validates standard Indian mobile numbers (10 digits starting with 6-9, optional +91 or 0 prefix)
+  static bool isValidIndianMobile(String phone) {
+    final clean = phone.replaceAll(RegExp(r'[\s\-()]'), '');
+    final regExp = RegExp(r'^(?:\+91|91|0)?[6-9]\d{9}$');
+    return regExp.hasMatch(clean);
+  }
+
+  /// Normalizes phone number into standard international format: +91XXXXXXXXXX
+  static String normalizePhoneNumber(String phone) {
+    String clean = phone.replaceAll(RegExp(r'[\s\-()]'), '');
+    if (clean.startsWith('+91')) {
+      return clean;
+    }
+    if (clean.startsWith('91') && clean.length == 12) {
+      return '+$clean';
+    }
+    if (clean.startsWith('0') && clean.length == 11) {
+      return '+91${clean.substring(1)}';
+    }
+    if (clean.length == 10 && RegExp(r'^[6-9]\d{9}$').hasMatch(clean)) {
+      return '+91$clean';
+    }
+    return clean;
+  }
+
+  // ==========================================
+  // FEATURE 2: EMERGENCY CONTACT MANAGEMENT
+  // ==========================================
+
+  /// Fetch all emergency contacts for a driver
+  Future<List<Map<String, dynamic>>> getEmergencyContacts(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (_isFirebaseAvailable()) {
+      try {
+        final snapshot = await _firestore
+            .collection('users')
+            .doc(normalized)
+            .collection('emergency_contacts')
+            .get();
+        if (snapshot.docs.isNotEmpty) {
+          return snapshot.docs.map((doc) => {'id': doc.id, ...doc.data()}).toList();
+        }
+      } catch (e) {
+        print("DatabaseService: Firestore getEmergencyContacts failed: $e");
+      }
+    }
+
+    if (!_mockEmergencyContacts.containsKey(normalized) || _mockEmergencyContacts[normalized]!.isEmpty) {
+      // Auto-populate default primary contact from user's parentPhone if available
+      final driver = _mockDrivers.firstWhere(
+        (d) => d['email'].toString().toLowerCase() == normalized,
+        orElse: () => {},
+      );
+      final phone = (driver['parentPhone'] ?? '').toString().trim();
+      if (phone.isNotEmpty) {
+        _mockEmergencyContacts[normalized] = [
+          {
+            'id': 'contact_primary_default',
+            'name': 'Primary Contact (${driver['fullName'] ?? "Driver"})',
+            'phone': normalizePhoneNumber(phone),
+            'relationship': 'Family',
+            'isPrimary': true,
+            'receiveAlerts': true,
+            'createdAt': DateTime.now().toIso8601String(),
+          }
+        ];
+        await _saveToPrefs();
+      } else {
+        _mockEmergencyContacts[normalized] = [];
+      }
+    }
+
+    return List.from(_mockEmergencyContacts[normalized] ?? []);
+  }
+
+  /// Add or update an emergency contact with duplicate validation
+  Future<void> saveEmergencyContact(String email, Map<String, dynamic> contact) async {
+    final normalized = email.trim().toLowerCase();
+    final rawPhone = (contact['phone'] ?? '').toString().trim();
+    if (!isValidIndianMobile(rawPhone)) {
+      throw Exception("Invalid Indian mobile number. Please enter a 10-digit number starting with 6-9.");
+    }
+    final phone = normalizePhoneNumber(rawPhone);
+
+    // Prevent duplicate numbers
+    final existing = await getEmergencyContacts(normalized);
+    final isDuplicate = existing.any((c) =>
+        c['id'] != contact['id'] &&
+        normalizePhoneNumber(c['phone'] ?? '') == phone);
+
+    if (isDuplicate) {
+      throw Exception("This phone number is already registered as an emergency contact.");
+    }
+
+    final bool isPrimary = contact['isPrimary'] == true || existing.isEmpty;
+    final contactId = contact['id'] ?? 'contact_${DateTime.now().millisecondsSinceEpoch}';
+
+    final contactData = {
+      'id': contactId,
+      'name': (contact['name'] ?? 'Emergency Contact').toString().trim(),
+      'phone': phone,
+      'relationship': (contact['relationship'] ?? '').toString().trim(),
+      'isPrimary': isPrimary,
+      'receiveAlerts': contact['receiveAlerts'] ?? true,
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+
+    if (_isFirebaseAvailable()) {
+      try {
+        if (isPrimary) {
+          final batch = _firestore.batch();
+          final allDocs = await _firestore
+              .collection('users')
+              .doc(normalized)
+              .collection('emergency_contacts')
+              .get();
+          for (var doc in allDocs.docs) {
+            batch.update(doc.reference, {'isPrimary': false});
+          }
+          batch.set(
+            _firestore
+                .collection('users')
+                .doc(normalized)
+                .collection('emergency_contacts')
+                .doc(contactId),
+            contactData,
+          );
+          await batch.commit();
+        } else {
+          await _firestore
+              .collection('users')
+              .doc(normalized)
+              .collection('emergency_contacts')
+              .doc(contactId)
+              .set(contactData);
+        }
+      } catch (e) {
+        print("DatabaseService: Firestore saveEmergencyContact failed: $e");
+      }
+    }
+
+    _mockEmergencyContacts.putIfAbsent(normalized, () => []);
+    final list = _mockEmergencyContacts[normalized]!;
+
+    if (isPrimary) {
+      for (var c in list) {
+        c['isPrimary'] = false;
+      }
+    }
+
+    final index = list.indexWhere((c) => c['id'] == contactId);
+    if (index >= 0) {
+      list[index] = contactData;
+    } else {
+      list.add(contactData);
+    }
+
+    // Synchronize parentPhone in driver profile if marked as primary
+    if (isPrimary) {
+      final driver = _mockDrivers.firstWhere(
+        (d) => d['email'].toString().toLowerCase() == normalized,
+        orElse: () => {},
+      );
+      if (driver.isNotEmpty) {
+        driver['parentPhone'] = phone;
+      }
+      if (_activeSessionUser != null &&
+          _activeSessionUser!['email'].toString().toLowerCase() == normalized) {
+        _activeSessionUser!['parentPhone'] = phone;
+      }
+    }
+
+    await _saveToPrefs();
+  }
+
+  /// Delete an emergency contact and reassign primary if necessary
+  Future<void> deleteEmergencyContact(String email, String contactId) async {
+    final normalized = email.trim().toLowerCase();
+    if (_isFirebaseAvailable()) {
+      try {
+        await _firestore
+            .collection('users')
+            .doc(normalized)
+            .collection('emergency_contacts')
+            .doc(contactId)
+            .delete();
+      } catch (e) {
+        print("DatabaseService: Firestore deleteEmergencyContact failed: $e");
+      }
+    }
+
+    if (_mockEmergencyContacts.containsKey(normalized)) {
+      final list = _mockEmergencyContacts[normalized]!;
+      final removed = list.firstWhere((c) => c['id'] == contactId, orElse: () => {});
+      final wasPrimary = removed['isPrimary'] == true;
+      list.removeWhere((c) => c['id'] == contactId);
+
+      // Reassign primary if needed
+      if (wasPrimary && list.isNotEmpty) {
+        list.first['isPrimary'] = true;
+        final driver = _mockDrivers.firstWhere(
+          (d) => d['email'].toString().toLowerCase() == normalized,
+          orElse: () => {},
+        );
+        if (driver.isNotEmpty) {
+          driver['parentPhone'] = list.first['phone'];
+        }
+      }
+      await _saveToPrefs();
+    }
+  }
+
+  /// Designate a specific contact as the primary emergency recipient
+  Future<void> setPrimaryEmergencyContact(String email, String contactId) async {
+    final normalized = email.trim().toLowerCase();
+    final list = await getEmergencyContacts(normalized);
+    for (var c in list) {
+      if (c['id'] == contactId) {
+        await saveEmergencyContact(email, {...c, 'isPrimary': true});
+        break;
+      }
+    }
+  }
+
+  // ==========================================
+  // FEATURE 8: EMERGENCY USER PROFILE
+  // ==========================================
+
+  /// Fetch driver emergency profile with medical notes and privacy consent
+  Future<Map<String, dynamic>> getEmergencyProfile(String email) async {
+    final normalized = email.trim().toLowerCase();
+    if (_isFirebaseAvailable()) {
+      try {
+        final doc = await _firestore.collection('users').doc(normalized).get();
+        if (doc.exists && doc.data() != null) {
+          final data = doc.data()!;
+          return {
+            'fullName': data['fullName'] ?? '',
+            'email': normalized,
+            'bloodGroup': data['bloodGroup'] ?? 'Unknown',
+            'medicalNotes': data['medicalNotes'] ?? '',
+            'consentToShareMedical': data['consentToShareMedical'] == true,
+            'parentPhone': data['parentPhone'] ?? '',
+          };
+        }
+      } catch (e) {
+        print("DatabaseService: Firestore getEmergencyProfile failed: $e");
+      }
+    }
+
+    if (_mockEmergencyProfiles.containsKey(normalized)) {
+      return _mockEmergencyProfiles[normalized]!;
+    }
+
+    final driver = _mockDrivers.firstWhere(
+      (d) => d['email'].toString().toLowerCase() == normalized,
+      orElse: () => {},
+    );
+
+    final defaultProfile = {
+      'fullName': driver['fullName'] ?? 'Driver',
+      'email': normalized,
+      'bloodGroup': driver['bloodGroup'] ?? 'Unknown',
+      'medicalNotes': '',
+      'consentToShareMedical': false, // Privacy first: default false
+      'parentPhone': driver['parentPhone'] ?? '',
+    };
+    _mockEmergencyProfiles[normalized] = defaultProfile;
+    return defaultProfile;
+  }
+
+  /// Update driver emergency profile details
+  Future<void> updateEmergencyProfile(String email, Map<String, dynamic> profileData) async {
+    final normalized = email.trim().toLowerCase();
+    final updated = {
+      ...profileData,
+      'email': normalized,
+      'updatedAt': DateTime.now().toIso8601String(),
+    };
+
+    if (_isFirebaseAvailable()) {
+      try {
+        await _firestore.collection('users').doc(normalized).set(
+          updated,
+          SetOptions(merge: true),
+        );
+      } catch (e) {
+        print("DatabaseService: Firestore updateEmergencyProfile failed: $e");
+      }
+    }
+
+    _mockEmergencyProfiles[normalized] = updated;
+
+    // Synchronize into _mockDrivers & _activeSessionUser
+    final driver = _mockDrivers.firstWhere(
+      (d) => d['email'].toString().toLowerCase() == normalized,
+      orElse: () => {},
+    );
+    if (driver.isNotEmpty) {
+      if (updated['fullName'] != null && updated['fullName'].toString().isNotEmpty) {
+        driver['fullName'] = updated['fullName'];
+      }
+      if (updated['bloodGroup'] != null && updated['bloodGroup'].toString().isNotEmpty) {
+        driver['bloodGroup'] = updated['bloodGroup'];
+      }
+    }
+
+    if (_activeSessionUser != null &&
+        _activeSessionUser!['email'].toString().toLowerCase() == normalized) {
+      if (updated['fullName'] != null) _activeSessionUser!['fullName'] = updated['fullName'];
+      if (updated['bloodGroup'] != null) _activeSessionUser!['bloodGroup'] = updated['bloodGroup'];
+      _activeSessionUser!['medicalNotes'] = updated['medicalNotes'];
+      _activeSessionUser!['consentToShareMedical'] = updated['consentToShareMedical'];
+    }
+
+    await _saveToPrefs();
+  }
+
   // Auth helper methods wrapping Firebase Auth
   Future<UserCredential?> signUpWithEmailAndPassword({
     required String email,
@@ -613,5 +996,66 @@ class DatabaseService {
       }
     }
     return _mockEngineStates;
+  }
+
+  // ==========================================
+  // OFFLINE MAP & HOSPITAL CACHE
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getOfflineHospitalCache() async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final raw = prefs.getString('offline_hospital_cache');
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final List<dynamic> list = jsonDecode(raw);
+        return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } catch (_) {}
+    }
+    // Default fallback: return regional mock hospitals
+    return List.from(_mockHospitals);
+  }
+
+  Future<void> saveOfflineHospitalCache(List<Map<String, dynamic>> hospitals) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    await prefs.setString('offline_hospital_cache', jsonEncode(hospitals));
+  }
+
+  // ==========================================
+  // PENDING EMERGENCY EVENTS RETRY QUEUE
+  // ==========================================
+  Future<List<Map<String, dynamic>>> getPendingEmergencyEvents() async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final raw = prefs.getString('pending_emergency_events');
+    if (raw != null && raw.isNotEmpty) {
+      try {
+        final List<dynamic> list = jsonDecode(raw);
+        return list.map((e) => Map<String, dynamic>.from(e as Map)).toList();
+      } catch (_) {}
+    }
+    return [];
+  }
+
+  Future<void> savePendingEmergencyEvent(Map<String, dynamic> event) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final current = await getPendingEmergencyEvents();
+    final id = event['id'] ?? 'evt_${DateTime.now().millisecondsSinceEpoch}';
+    final index = current.indexWhere((e) => e['id'] == id);
+    if (index >= 0) {
+      current[index] = event;
+    } else {
+      current.insert(0, event);
+    }
+    await prefs.setString('pending_emergency_events', jsonEncode(current));
+  }
+
+  Future<void> removePendingEmergencyEvent(String eventId) async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    final current = await getPendingEmergencyEvents();
+    current.removeWhere((e) => e['id'] == eventId);
+    await prefs.setString('pending_emergency_events', jsonEncode(current));
+  }
+
+  Future<void> clearPendingEmergencyEvents() async {
+    final prefs = _prefs ?? await SharedPreferences.getInstance();
+    await prefs.remove('pending_emergency_events');
   }
 }

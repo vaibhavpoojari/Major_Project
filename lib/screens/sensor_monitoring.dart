@@ -1,11 +1,13 @@
 import 'dart:async';
 import 'package:flutter/material.dart';
 import 'package:geolocator/geolocator.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 import '../services/sensor_service.dart';
 import '../services/database_service.dart';
 import '../services/alert_service.dart';
 import '../services/buzzer_service.dart';
 import '../services/permission_service.dart';
+import '../services/localization_service.dart';
 import '../widgets/emergency_ui_components.dart';
 
 class SensorMonitoring extends StatefulWidget {
@@ -31,9 +33,11 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
 
   // Emergency state control
   bool _isEmergencyState = false;
-  int _countdownSeconds = 30;
+  int _countdownSeconds = 20;
+  int _configuredCountdown = 20;
   Timer? _countdownTimer;
   String _crashType = "Severe Collision";
+  DateTime? _lastAlertTime;
 
   // Animation controller for emergency alert pulse
   late AnimationController _emergencyPulseController;
@@ -53,8 +57,26 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       CurvedAnimation(parent: _emergencyPulseController, curve: Curves.easeInOut),
     );
     _loadDrivers();
+    _loadCountdownConfig();
     widget.alertService.requestSmsPermission();
     _addLog("Telematics initialized. Select driver profile to start monitoring.");
+  }
+
+  Future<void> _loadCountdownConfig() async {
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final duration = prefs.getInt('sos_countdown_duration') ?? 20;
+      if (duration >= 15 && duration <= 30) {
+        if (mounted) {
+          setState(() {
+            _configuredCountdown = duration;
+            if (!_isEmergencyState) {
+              _countdownSeconds = duration;
+            }
+          });
+        }
+      }
+    } catch (_) {}
   }
 
   void _addLog(String msg) {
@@ -159,6 +181,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
   void _triggerEmergencyState(double magnitude, String crashType) {
     if (_isEmergencyState) return;
 
+    // Feature 1: Duplicate alert lockout guard (ignore sensor spikes within 5 seconds)
+    if (_lastAlertTime != null &&
+        DateTime.now().difference(_lastAlertTime!).inSeconds < 5) {
+      _addLog("Cooldown active: duplicate accident trigger debounced.");
+      return;
+    }
+    _lastAlertTime = DateTime.now();
+
     _sensorService.stopListening();
     widget.alertService.preFetchLocation();
 
@@ -168,13 +198,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       _isEmergencyState = true;
       _isEngineActive = false;
       _currentForce = magnitude;
-      _countdownSeconds = 30;
+      _countdownSeconds = _configuredCountdown;
       _crashType = crashType;
     });
 
-    _addLog("CRITICAL: $crashType detected (${magnitude.toStringAsFixed(2)} m/s²). Sounding buzzer. 30s override timer active.");
+    _addLog("CRITICAL: $crashType detected (${magnitude.toStringAsFixed(2)} m/s²). Sounding buzzer. ${_configuredCountdown}s override timer active.");
     BuzzerService().startBuzzer();
 
+    _countdownTimer?.cancel();
     _countdownTimer = Timer.periodic(const Duration(seconds: 1), (timer) {
       if (_countdownSeconds > 1) {
         setState(() {
@@ -187,14 +218,39 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
     });
   }
 
-  void _cancelEmergencyState() {
+  void _cancelEmergencyState() async {
     _countdownTimer?.cancel();
     _emergencyPulseController.reset();
     BuzzerService().stopBuzzer();
     setState(() {
       _isEmergencyState = false;
     });
+    _lastAlertTime = DateTime.now();
     _addLog("USER OVERRIDE: 'I AM SAFE' verified. Alert cancelled. Monitoring resumed.");
+
+    // Log safety override cancellation event in database
+    try {
+      if (_selectedDriver != null) {
+        await _dbService.createCrashReport({
+          'driverName': _selectedDriver!['fullName'] ?? 'Driver',
+          'driverEmail': _selectedDriver!['email'] ?? '',
+          'bloodGroup': _selectedDriver!['bloodGroup'] ?? 'Unknown',
+          'latitude': 12.9716,
+          'longitude': 77.5946,
+          'crashType': _crashType,
+          'maxAcceleration': _currentForce,
+          'nearestHospital': 'Cancelled by User',
+          'hospitalDistance': 'N/A',
+          'hospitalPhone': 'N/A',
+          'hospitalStatus': 'Cancelled',
+          'smsStatus': 'Cancelled (Safe)',
+          'alertStatus': 'Cancelled by Driver',
+          'isCancelled': true,
+          'status': 'Cancelled',
+        });
+      }
+    } catch (_) {}
+
     _toggleSensorEngine();
   }
 
@@ -211,6 +267,7 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
       final results = await widget.alertService.sendEmergencyAlerts(
         userProfile: _selectedDriver!,
         crashType: _crashType,
+        maxAcceleration: _currentForce,
       );
 
       final List<dynamic> topHospList = results['topHospitals'] is List ? results['topHospitals'] as List : [];
@@ -455,6 +512,63 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
     });
   }
 
+  void _triggerManualSos() {
+    if (_selectedDriver == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Select a Driver profile first!")),
+      );
+      return;
+    }
+    showDialog(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        backgroundColor: const Color(0xFF161E2E),
+        shape: RoundedRectangleBorder(
+          borderRadius: BorderRadius.circular(20),
+          side: const BorderSide(color: Color(0xFFEF4444)),
+        ),
+        title: Row(
+          children: [
+            const Icon(Icons.emergency_share, color: Color(0xFFEF4444), size: 28),
+            const SizedBox(width: 10),
+            Expanded(
+              child: Text(
+                'manual_sos'.tr,
+                style: const TextStyle(
+                  fontFamily: 'Outfit',
+                  color: Colors.white,
+                  fontWeight: FontWeight.bold,
+                  fontSize: 18,
+                ),
+              ),
+            ),
+          ],
+        ),
+        content: const Text(
+          "Trigger emergency SOS broadcast immediately? This will activate the alert pipeline and alert your emergency contacts with your GPS location.",
+          style: TextStyle(fontFamily: 'Inter', color: Color(0xFF94A3B8), fontSize: 14),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(ctx),
+            child: Text('cancel'.tr, style: const TextStyle(color: Colors.white70)),
+          ),
+          ElevatedButton(
+            style: ElevatedButton.styleFrom(
+              backgroundColor: const Color(0xFFEF4444),
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(10)),
+            ),
+            onPressed: () {
+              Navigator.pop(ctx);
+              _triggerEmergencyState(50.0, "Manual SOS Broadcast");
+            },
+            child: const Text('ACTIVATE NOW', style: TextStyle(color: Colors.white, fontWeight: FontWeight.bold)),
+          ),
+        ],
+      ),
+    );
+  }
+
   @override
   void dispose() {
     _sensorService.dispose();
@@ -531,16 +645,17 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                   ),
                   const SizedBox(height: 22),
 
-                  const Center(
+                  Center(
                     child: Text(
-                      "ACCIDENT DETECTED",
-                      style: TextStyle(
+                      'accident_detected'.tr,
+                      style: const TextStyle(
                         fontFamily: 'Outfit',
                         fontSize: 28,
                         fontWeight: FontWeight.w900,
                         color: Colors.white,
                         letterSpacing: 1.5,
                       ),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                   const SizedBox(height: 6),
@@ -565,10 +680,11 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                   ),
                   const SizedBox(height: 24),
 
-                  const Center(
+                  Center(
                     child: Text(
-                      "Automated emergency broadcast in:",
-                      style: TextStyle(fontFamily: 'Inter', fontSize: 14, color: Color(0xFFCBD5E1)),
+                      'countdown_prompt'.tr,
+                      style: const TextStyle(fontFamily: 'Inter', fontSize: 14, color: Color(0xFFCBD5E1)),
+                      textAlign: TextAlign.center,
                     ),
                   ),
                   const SizedBox(height: 8),
@@ -613,14 +729,14 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                           ),
                         ],
                       ),
-                      child: const Row(
+                      child: Row(
                         mainAxisAlignment: MainAxisAlignment.center,
                         children: [
-                          Icon(Icons.send_rounded, size: 18, color: Color(0xFF0F172A)),
-                          SizedBox(width: 8),
+                          const Icon(Icons.send_rounded, size: 18, color: Color(0xFF0F172A)),
+                          const SizedBox(width: 8),
                           Text(
-                            "Send Immediately (Bypass Timer)",
-                            style: TextStyle(
+                            'send_immediately'.tr,
+                            style: const TextStyle(
                               fontFamily: 'Outfit',
                               fontWeight: FontWeight.bold,
                               fontSize: 14,
@@ -651,11 +767,11 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                           ),
                         ],
                       ),
-                      child: const Column(
+                      child: Column(
                         children: [
                           Text(
-                            "I AM SAFE",
-                            style: TextStyle(
+                            'i_am_safe'.tr,
+                            style: const TextStyle(
                               fontFamily: 'Outfit',
                               fontSize: 22,
                               fontWeight: FontWeight.w900,
@@ -663,7 +779,8 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                               color: Color(0xFFBE123C),
                             ),
                           ),
-                          Text(
+                          const SizedBox(height: 4),
+                          const Text(
                             "TAP TO CANCEL EMERGENCY ALERTS",
                             style: TextStyle(
                               fontFamily: 'Inter',
@@ -934,6 +1051,48 @@ class _SensorMonitoringState extends State<SensorMonitoring> with TickerProvider
                               fontWeight: FontWeight.bold,
                               color: Colors.white,
                               letterSpacing: 0.3,
+                            ),
+                          ),
+                        ],
+                      ),
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 14),
+
+                // Manual Emergency SOS Button
+                FadeSlideTransition(
+                  delay: const Duration(milliseconds: 170),
+                  child: InteractivePressable(
+                    onTap: _triggerManualSos,
+                    borderRadius: BorderRadius.circular(16),
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                      decoration: BoxDecoration(
+                        color: const Color(0xFFEF4444).withValues(alpha: 0.15),
+                        borderRadius: BorderRadius.circular(16),
+                        border: Border.all(color: const Color(0xFFEF4444), width: 1.5),
+                        boxShadow: [
+                          BoxShadow(
+                            color: const Color(0xFFEF4444).withValues(alpha: 0.2),
+                            blurRadius: 10,
+                            offset: const Offset(0, 3),
+                          ),
+                        ],
+                      ),
+                      child: Row(
+                        mainAxisAlignment: MainAxisAlignment.center,
+                        children: [
+                          const Icon(Icons.emergency_share, color: Color(0xFFEF4444), size: 22),
+                          const SizedBox(width: 10),
+                          Text(
+                            'manual_sos'.tr,
+                            style: const TextStyle(
+                              fontFamily: 'Outfit',
+                              fontSize: 15,
+                              fontWeight: FontWeight.bold,
+                              color: Color(0xFFEF4444),
+                              letterSpacing: 0.5,
                             ),
                           ),
                         ],

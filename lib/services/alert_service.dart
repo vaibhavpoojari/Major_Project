@@ -7,6 +7,7 @@ import 'package:mailer/mailer.dart';
 import 'package:mailer/smtp_server.dart';
 import 'database_service.dart';
 import 'hospital_service.dart';
+import 'offline_queue_service.dart';
 
 class SmsDispatchResult {
   final String recipient;
@@ -18,6 +19,8 @@ class SmsDispatchResult {
   final int elapsedMs;
   final String? errorMessage;
   final bool deliveryConfirmed;
+  final int retryAttempts;
+  final List<Map<String, dynamic>> attemptLogs;
 
   SmsDispatchResult({
     required this.recipient,
@@ -29,6 +32,8 @@ class SmsDispatchResult {
     required this.elapsedMs,
     this.errorMessage,
     this.deliveryConfirmed = false,
+    this.retryAttempts = 0,
+    this.attemptLogs = const [],
   });
 
   Map<String, dynamic> toMap() {
@@ -42,6 +47,8 @@ class SmsDispatchResult {
       'elapsedMs': elapsedMs,
       'errorMessage': errorMessage,
       'deliveryConfirmed': deliveryConfirmed,
+      'retryAttempts': retryAttempts,
+      'attemptLogs': attemptLogs,
     };
   }
 }
@@ -53,6 +60,26 @@ class AlertService {
   );
 
   Position? _cachedPosition;
+  static bool _isBroadcasting = false;
+  static DateTime? _lastBroadcastTime;
+
+  bool get isBroadcasting => _isBroadcasting;
+  static DateTime? get lastBroadcastTime => _lastBroadcastTime;
+
+  /// Manual SOS Activation without waiting for crash force threshold
+  Future<Map<String, dynamic>> sendManualSos({
+    required Map<String, dynamic> userProfile,
+    double? overrideLatitude,
+    double? overrideLongitude,
+  }) async {
+    return sendEmergencyAlerts(
+      userProfile: userProfile,
+      crashType: 'Manual Emergency SOS Triggered',
+      overrideLatitude: overrideLatitude,
+      overrideLongitude: overrideLongitude,
+      maxAcceleration: 0.0,
+    );
+  }
 
   Future<void> preFetchLocation() async {
     print("AlertService: Starting background GPS pre-fetch...");
@@ -92,117 +119,220 @@ class AlertService {
     return "$prefix****$suffix";
   }
 
-  /// Core routine: Trigger immediate emergency SMS dispatch to parent without blocking,
+  /// Core routine: Trigger immediate emergency SMS dispatch to parent/contacts without blocking,
   /// query nearest real hospital via OpenStreetMap concurrently, and dispatch hospital alerts as soon as ready.
   Future<Map<String, dynamic>> sendEmergencyAlerts({
     required Map<String, dynamic> userProfile,
     required String crashType,
     double? overrideLatitude,
     double? overrideLongitude,
+    double? maxAcceleration,
   }) async {
-    print(
-      "AlertService: Starting immediate emergency alert sequence for crash type: $crashType",
-    );
+    // Atomic lockout guard to prevent duplicate concurrent broadcast executions
+    if (_isBroadcasting) {
+      print("AlertService: Emergency alert broadcast already in progress. Ignoring duplicate trigger.");
+      return {
+        'status': 'duplicate_prevented',
+        'isSuccess': false,
+        'message': 'Duplicate emergency alert prevented by atomic safety lock.',
+      };
+    }
+    _isBroadcasting = true;
+    _lastBroadcastTime = DateTime.now();
 
-    // 1. Acquire current LIVE GPS Location
-    double? lat = overrideLatitude;
-    double? lng = overrideLongitude;
+    try {
+      print(
+        "AlertService: Starting immediate emergency alert sequence for crash type: $crashType",
+      );
 
-    if (lat != null && lng != null) {
-      lat = double.parse(lat.toStringAsFixed(5));
-      lng = double.parse(lng.toStringAsFixed(5));
-    } else {
-      Position? position;
-      try {
-        bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
-        if (!serviceEnabled) {
-          print("AlertService: Location services disabled on device, checking last known position.");
-        }
+      // 1. Acquire current LIVE GPS Location
+      double? lat = overrideLatitude;
+      double? lng = overrideLongitude;
+      double? accuracy;
+      bool isStaleGps = false;
 
-        LocationPermission permission = await Geolocator.checkPermission();
-        if (permission == LocationPermission.denied) {
-          permission = await Geolocator.requestPermission();
-        }
-
-        if (permission == LocationPermission.always ||
-            permission == LocationPermission.whileInUse) {
-          final cached = _cachedPosition;
-          if (cached != null) {
-            position = cached;
-            print("AlertService: Acquired pre-fetched background GPS: ${cached.latitude}, ${cached.longitude}");
-            _cachedPosition = null;
-          } else {
-            try {
-              position = await Geolocator.getCurrentPosition(
-                desiredAccuracy: LocationAccuracy.high,
-                timeLimit: const Duration(seconds: 6),
-              );
-            } catch (e) {
-              print("AlertService: Live GPS fast lock timed out ($e), attempting last known GPS position...");
-              try {
-                position = await Geolocator.getLastKnownPosition();
-              } catch (_) {}
-            }
+      if (lat != null && lng != null) {
+        lat = double.parse(lat.toStringAsFixed(5));
+        lng = double.parse(lng.toStringAsFixed(5));
+        accuracy = 5.0; // Simulated test override accuracy
+      } else {
+        Position? position;
+        try {
+          bool serviceEnabled = await Geolocator.isLocationServiceEnabled();
+          if (!serviceEnabled) {
+            print("AlertService: Location services disabled on device, checking last known position.");
           }
-        } else {
-          print("AlertService: GPS permission denied, attempting last known position.");
+
+          LocationPermission permission = await Geolocator.checkPermission();
+          if (permission == LocationPermission.denied) {
+            permission = await Geolocator.requestPermission();
+          }
+
+          if (permission == LocationPermission.always ||
+              permission == LocationPermission.whileInUse) {
+            final cached = _cachedPosition;
+            if (cached != null) {
+              position = cached;
+              accuracy = cached.accuracy;
+              if (DateTime.now().difference(cached.timestamp).inMinutes > 5) {
+                isStaleGps = true;
+              }
+              print("AlertService: Acquired pre-fetched background GPS: ${cached.latitude}, ${cached.longitude} (Accuracy: ±${cached.accuracy.toStringAsFixed(1)}m)");
+              _cachedPosition = null;
+            } else {
+              try {
+                position = await Geolocator.getCurrentPosition(
+                  desiredAccuracy: LocationAccuracy.high,
+                  timeLimit: const Duration(seconds: 6),
+                );
+                accuracy = position.accuracy;
+              } catch (e) {
+                print("AlertService: Live GPS fast lock timed out ($e), attempting last known GPS position...");
+                try {
+                  position = await Geolocator.getLastKnownPosition();
+                  if (position != null) {
+                    accuracy = position.accuracy;
+                    if (DateTime.now().difference(position.timestamp).inMinutes > 5) {
+                      isStaleGps = true;
+                    }
+                  }
+                } catch (_) {}
+              }
+            }
+          } else {
+            print("AlertService: GPS permission denied, attempting last known position.");
+            try {
+              position = await Geolocator.getLastKnownPosition();
+              if (position != null) {
+                accuracy = position.accuracy;
+              }
+            } catch (_) {}
+          }
+        } catch (e) {
+          print("AlertService: GPS fetch error: $e");
+        }
+
+        final pos = position;
+        if (pos != null) {
+          lat = double.parse(pos.latitude.toStringAsFixed(5));
+          lng = double.parse(pos.longitude.toStringAsFixed(5));
+        }
+      }
+
+      final bool hasValidGps = (lat != null && lng != null);
+      final double? actualLat = lat;
+      final double? actualLng = lng;
+
+      if (hasValidGps && actualLat != null && actualLng != null) {
+        print("ACCIDENT GPS: $actualLat, $actualLng (Accuracy: ±${accuracy?.toStringAsFixed(1) ?? 'N/A'}m${isStaleGps ? ' - STALE' : ''})");
+      } else {
+        print("ACCIDENT GPS: Unavailable");
+      }
+
+      // 2. Format Message Payloads with Enhanced Live GPS and Date/Time
+      final String nowFormatted = DateTime.now().toIso8601String().replaceAll('T', ' ').substring(0, 19);
+      final String mapsLink = (hasValidGps && actualLat != null && actualLng != null)
+          ? "https://maps.google.com/?q=$actualLat,$actualLng"
+          : "GPS signal unavailable";
+      final String coordsDisplay = (hasValidGps && actualLat != null && actualLng != null)
+          ? "Lat: $actualLat, Lng: $actualLng"
+          : "Unavailable";
+      final String accuracyDisplay = (accuracy != null && accuracy > 0)
+          ? "±${accuracy.toStringAsFixed(1)}m"
+          : "Approximate";
+
+      final String name = userProfile['fullName'] ?? "Driver";
+      final String bloodGroup = userProfile['bloodGroup'] ?? "Unknown";
+      final String driverEmail = (userProfile['email'] ?? '').toString().trim();
+      final String parentPhone = (userProfile['parentPhone'] ?? "").toString().trim();
+      final String parentEmail = (userProfile['parentEmail'] ?? userProfile['email'] ?? "").toString().trim();
+
+      // Check explicit medical consent
+      final bool consentMedical = userProfile['consentToShareMedical'] == true;
+      final String medicalNotes = (consentMedical &&
+              userProfile['medicalNotes'] != null &&
+              userProfile['medicalNotes'].toString().trim().isNotEmpty)
+          ? "\nMedical Notes: ${userProfile['medicalNotes']}"
+          : "";
+
+      final String locationText = (hasValidGps && actualLat != null && actualLng != null)
+          ? "Location: $mapsLink ($coordsDisplay)\nAccuracy: $accuracyDisplay"
+          : "Location: GPS signal unavailable";
+
+      final String parentMsg =
+          "EMERGENCY ALERT!\n"
+          "A possible accident has been detected ($crashType).\n"
+          "$locationText\n"
+          "Time: $nowFormatted\n"
+          "Status: Critical Impact Detected\n"
+          "Driver: $name (Blood: $bloodGroup)$medicalNotes\n"
+          "Please contact the person immediately.";
+
+      final String hospitalMsg =
+          "EMERGENCY AMBULANCE DISPATCH REQUEST!\n"
+          "Crash Type: $crashType\n"
+          "$locationText\n"
+          "Time: $nowFormatted\n"
+          "Status: Critical Impact Detected\n"
+          "Patient: $name (Blood: $bloodGroup)$medicalNotes\n"
+          "Immediate medical rescue required.";
+
+      // 3. STEP A: MULTI-CONTACT EMERGENCY SMS DISPATCH WITH RETRY SYSTEM
+      final Future<List<SmsDispatchResult>> contactsSmsFuture = () async {
+        List<Map<String, dynamic>> contacts = [];
+        if (driverEmail.isNotEmpty) {
           try {
-            position = await Geolocator.getLastKnownPosition();
+            contacts = await _dbService.getEmergencyContacts(driverEmail);
           } catch (_) {}
         }
-      } catch (e) {
-        print("AlertService: GPS fetch error: $e");
-      }
 
-      final pos = position;
-      if (pos != null) {
-        lat = double.parse(pos.latitude.toStringAsFixed(5));
-        lng = double.parse(pos.longitude.toStringAsFixed(5));
-      }
-    }
+        // Fallback to parentPhone if no contacts configured
+        if (contacts.isEmpty && parentPhone.isNotEmpty) {
+          contacts = [
+            {
+              'id': 'legacy_parent',
+              'name': 'Primary Contact',
+              'phone': DatabaseService.normalizePhoneNumber(parentPhone),
+              'isPrimary': true,
+            }
+          ];
+        }
 
-    final bool hasValidGps = (lat != null && lng != null);
-    final double? actualLat = lat;
-    final double? actualLng = lng;
+        if (contacts.isEmpty) {
+          return [
+            SmsDispatchResult(
+              recipient: '',
+              maskedRecipient: 'Unconfigured',
+              method: 'None',
+              status: 'failed',
+              statusDisplay: 'Unconfigured',
+              isSuccess: false,
+              elapsedMs: 0,
+              errorMessage: 'No emergency contacts configured',
+            )
+          ];
+        }
 
-    if (hasValidGps && actualLat != null && actualLng != null) {
-      print("ACCIDENT GPS: $actualLat, $actualLng");
-    } else {
-      print("ACCIDENT GPS: Unavailable");
-    }
+        // Sort: primary contact first
+        contacts.sort((a, b) {
+          if (a['isPrimary'] == true && b['isPrimary'] != true) return -1;
+          if (b['isPrimary'] == true && a['isPrimary'] != true) return 1;
+          return 0;
+        });
 
-    // 2. Format Message Payloads
-    final String name = userProfile['fullName'] ?? "Driver";
-    final String bloodGroup = userProfile['bloodGroup'] ?? "Unknown";
-    final String parentPhone = (userProfile['parentPhone'] ?? "").toString().trim();
-    final String parentEmail = (userProfile['parentEmail'] ?? userProfile['email'] ?? "").toString().trim();
+        final List<SmsDispatchResult> dispatchResults = [];
+        for (var contact in contacts) {
+          // Feature 3: Only dispatch to contacts selected for alerts
+          if (contact['receiveAlerts'] == false) continue;
 
-    final String locationText = (hasValidGps && actualLat != null && actualLng != null)
-        ? "Exact Coordinates: Latitude: $actualLat, Longitude: $actualLng. Map Link: https://www.google.com/maps/search/?api=1&query=$actualLat,$actualLng"
-        : "Coordinates: GPS signal unavailable";
-
-    final String parentMsg =
-        "CRITICAL ALERT: $crashType detected! Driver: $name, Blood Group: $bloodGroup. $locationText";
-
-    final String hospitalMsg =
-        "EMERGENCY AMBULANCE DISPATCH REQUEST: $crashType detected! Driver: $name, Blood Group: $bloodGroup. $locationText";
-
-    // 3. STEP A: START PARENT SMS IMMEDIATELY (NO WAITING FOR HOSPITAL DISCOVERY)
-    final Future<SmsDispatchResult> parentSmsFuture = () async {
-      if (parentPhone.isNotEmpty) {
-        return await _sendSingleSms(parentPhone, parentMsg);
-      }
-      return SmsDispatchResult(
-        recipient: '',
-        maskedRecipient: 'Unconfigured',
-        method: 'None',
-        status: 'failed',
-        statusDisplay: 'Unconfigured',
-        isSuccess: false,
-        elapsedMs: 0,
-        errorMessage: 'Parent phone number is empty',
-      );
-    }();
+          final phone = (contact['phone'] ?? '').toString().trim();
+          if (phone.isNotEmpty) {
+            final res = await _sendSmsWithRetry(phone, parentMsg);
+            dispatchResults.add(res);
+          }
+        }
+        return dispatchResults;
+      }();
 
     // 4. STEP B: CONCURRENT HOSPITAL DISCOVERY & HOSPITAL ALERT CHAIN
     final Future<Map<String, dynamic>> hospitalChainFuture = () async {
@@ -327,12 +457,24 @@ class AlertService {
 
     // 6. EXECUTE ALL INDEPENDENT TASKS CONCURRENTLY
     final results = await Future.wait([
-      parentSmsFuture,
+      contactsSmsFuture,
       hospitalChainFuture,
       parentEmailFuture,
     ]);
 
-    final SmsDispatchResult parentSmsResult = results[0] as SmsDispatchResult;
+    final List<SmsDispatchResult> allContactSmsResults = results[0] as List<SmsDispatchResult>;
+    final SmsDispatchResult parentSmsResult = allContactSmsResults.isNotEmpty
+        ? allContactSmsResults.first
+        : SmsDispatchResult(
+            recipient: parentPhone,
+            maskedRecipient: maskPhoneNumber(parentPhone),
+            method: 'None',
+            status: 'failed',
+            statusDisplay: 'Unconfigured',
+            isSuccess: false,
+            elapsedMs: 0,
+            errorMessage: 'No contact configured',
+          );
     final Map<String, dynamic> hospData = results[1] as Map<String, dynamic>;
     final bool parentEmailSent = results[2] as bool;
 
@@ -359,27 +501,68 @@ class AlertService {
                 ? "Lookup timed out"
                 : (hospitalName.contains('failed') ? "API error" : "Distance unavailable")));
 
-    // Log crash report to database
+    // Compute overall SMS status separating submission from confirmed delivery
+    final bool anySmsDelivered = allContactSmsResults.any((r) => r.status == 'delivered');
+    final bool anySmsSent = allContactSmsResults.any((r) => r.isSuccess);
+    final String overallSmsStatus = anySmsDelivered
+        ? 'Delivered'
+        : (anySmsSent ? 'Sent (Submitted)' : (allContactSmsResults.isEmpty ? 'Unconfigured' : 'Failed'));
+
+    // Log complete crash report and event details to database
     try {
       await _dbService.createCrashReport({
         'driverName': name,
+        'driverEmail': driverEmail,
         'bloodGroup': bloodGroup,
         'latitude': actualLat,
         'longitude': actualLng,
+        'locationAccuracy': accuracyDisplay,
+        'googleMapsUrl': mapsLink,
+        'incidentTime': nowFormatted,
         'crashType': crashType,
+        'maxAcceleration': maxAcceleration ?? 35.0,
         'nearestHospital': hospitalName,
         'hospitalDistance': hospitalDistance != null ? "${hospitalDistance.toStringAsFixed(2)} km" : "N/A",
         'hospitalPhone': hasValidHospitalPhone && hospitalPhone != null ? hospitalPhone : "Unavailable",
+        'hospitalStatus': hospitalSent ? 'Notified (SMS)' : (hospitalEmailSent ? 'Notified (Email)' : hospitalSmsStatus),
+        'smsStatus': overallSmsStatus,
+        'smsDispatchResults': allContactSmsResults.map((r) => r.toMap()).toList(),
+        'alertStatus': 'Dispatched',
         'status': 'Pending',
       });
     } catch (e) {
       print("AlertService: Failed to create database crash report: $e");
     }
 
+    // If SMS dispatch failed or device is offline, enqueue in persistent OfflineEventQueueService
+    if (allContactSmsResults.every((r) => !r.isSuccess)) {
+      try {
+        await OfflineEventQueueService.instance.enqueueEvent(
+          eventId: "evt_${DateTime.now().millisecondsSinceEpoch}_$driverEmail",
+          driverEmail: driverEmail,
+          driverName: name,
+          crashType: crashType,
+          latitude: actualLat ?? 0.0,
+          longitude: actualLng ?? 0.0,
+          accuracy: accuracy ?? 10.0,
+          isStaleLocation: isStaleGps,
+          recipients: allContactSmsResults.map((r) => r.recipient).toList(),
+          needsSmsRetry: true,
+          needsEmailRetry: !emailSent,
+          needsFirestoreSync: true,
+          medicalNotes: medicalNotes,
+        );
+      } catch (_) {}
+    }
+
     return {
       'lat': actualLat,
       'lng': actualLng,
       'hasValidGps': hasValidGps,
+      'locationAccuracy': accuracyDisplay,
+      'googleMapsUrl': mapsLink,
+      'incidentTime': nowFormatted,
+      'maxAcceleration': maxAcceleration ?? 35.0,
       'nearestHospital': hospitalName,
       'distance': hospitalDistance,
       'distanceStr': distanceStr,
@@ -396,8 +579,10 @@ class AlertService {
       'hospitalSent': hospitalSent,
       'parentSmsResult': parentSmsResult.toMap(),
       'hospitalSmsResult': hospitalSmsResult?.toMap(),
+      'allContactSmsResults': allContactSmsResults.map((r) => r.toMap()).toList(),
       'parentSmsStatus': parentSmsResult.statusDisplay,
       'hospitalSmsStatus': hospitalSmsStatus,
+      'overallSmsStatus': overallSmsStatus,
       'emailSent': emailSent,
       'parentEmailSent': parentEmailSent,
       'hospitalEmailSent': hospitalEmailSent,
@@ -405,6 +590,9 @@ class AlertService {
       'parentEmail': parentEmail,
       'hospitalEmail': hospData['hospitalEmail'] ?? '',
     };
+    } finally {
+      _isBroadcasting = false;
+    }
   }
 
 
@@ -541,7 +729,7 @@ class AlertService {
     print("EMAIL REQUEST START (Port 465 SSL)");
     try {
       final smtpServer465 = gmail(cleanUsername, cleanPassword);
-      final sendReport = await send(
+      await send(
         message,
         smtpServer465,
       ).timeout(const Duration(seconds: 8));
@@ -567,7 +755,7 @@ class AlertService {
           username: cleanUsername,
           password: cleanPassword,
         );
-        final sendReport = await send(
+        await send(
           message,
           smtpServer587,
         ).timeout(const Duration(seconds: 8));
@@ -594,6 +782,70 @@ class AlertService {
         };
       }
     }
+  }
+
+  /// Retry-enabled SMS dispatcher with delivery logs, attempt tracking, and retry delays
+  Future<SmsDispatchResult> _sendSmsWithRetry(
+    String phoneNumber,
+    String message, {
+    int maxRetries = 2,
+    Duration retryInterval = const Duration(seconds: 2),
+  }) async {
+    final List<Map<String, dynamic>> attemptLogs = [];
+    SmsDispatchResult? lastResult;
+
+    for (int attempt = 1; attempt <= (maxRetries + 1); attempt++) {
+      final attemptTime = DateTime.now().toIso8601String();
+      final result = await _sendSingleSms(phoneNumber, message);
+      lastResult = result;
+
+      attemptLogs.add({
+        'attempt': attempt,
+        'timestamp': attemptTime,
+        'status': result.status,
+        'statusDisplay': result.statusDisplay,
+        'method': result.method,
+        'isSuccess': result.isSuccess,
+        'elapsedMs': result.elapsedMs,
+        'errorMessage': result.errorMessage,
+        'deliveryConfirmed': result.deliveryConfirmed,
+      });
+
+      if (result.isSuccess) {
+        return SmsDispatchResult(
+          recipient: result.recipient,
+          maskedRecipient: result.maskedRecipient,
+          method: result.method,
+          status: result.status,
+          statusDisplay: result.statusDisplay,
+          isSuccess: true,
+          elapsedMs: result.elapsedMs,
+          errorMessage: result.errorMessage,
+          deliveryConfirmed: result.deliveryConfirmed,
+          retryAttempts: attempt - 1,
+          attemptLogs: attemptLogs,
+        );
+      }
+
+      if (attempt <= maxRetries) {
+        print("AlertService: SMS dispatch to ${result.maskedRecipient} failed (Attempt $attempt). Retrying in ${retryInterval.inSeconds}s...");
+        await Future.delayed(retryInterval);
+      }
+    }
+
+    return SmsDispatchResult(
+      recipient: lastResult?.recipient ?? phoneNumber,
+      maskedRecipient: lastResult?.maskedRecipient ?? maskPhoneNumber(phoneNumber),
+      method: lastResult?.method ?? 'None',
+      status: 'failed',
+      statusDisplay: 'Failed (Retries Exhausted)',
+      isSuccess: false,
+      elapsedMs: lastResult?.elapsedMs ?? 0,
+      errorMessage: lastResult?.errorMessage ?? 'Max retries exhausted without response',
+      deliveryConfirmed: false,
+      retryAttempts: maxRetries,
+      attemptLogs: attemptLogs,
+    );
   }
 
   /// Internal Immediate SMS dispatcher: Primary TextBee API -> Fallback Native Android SIM
@@ -747,17 +999,18 @@ class AlertService {
       nativeStopwatch.stop();
       final int elapsed = nativeStopwatch.elapsedMilliseconds;
 
-      print("Result: dispatched");
+      print("Result: submitted");
       print("Elapsed time: $elapsed ms");
 
       return SmsDispatchResult(
         recipient: formatted,
         maskedRecipient: masked,
         method: 'Native SIM',
-        status: 'dispatched',
-        statusDisplay: 'Dispatched',
+        status: 'submitted',
+        statusDisplay: 'Submitted (Cellular Baseband)',
         isSuccess: true,
         elapsedMs: elapsed,
+        deliveryConfirmed: false,
       );
     } catch (e) {
       nativeStopwatch.stop();
