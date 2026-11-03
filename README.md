@@ -1,592 +1,161 @@
-# 🛡️ Accident Guard
-### Smart Accident Detection and Emergency Alert System
+# Accident Guard – Smart Accident Detection and Emergency Response System
 
-<p align="center">
-  <b>Detect Early. Alert Quickly. Save Lives.</b>
-</p>
+Accident Guard is a Flutter-based Android application designed to detect potential vehicle accidents using smartphone sensors and support emergency response through GPS tracking, SMS notifications and hospital discovery.
 
-<p align="center">
-  A Flutter-based smart accident detection and emergency response application using smartphone sensors, GPS, Firebase and multi-channel emergency notifications.
-</p>
+## Features
 
----
+- **Accident Detection:** Monitors smartphone accelerometer data to identify potential accidents using a threshold of 35.0 m/s².
+- **Impact Classification:** Identifies Frontal/Rear Collision, Side Impact (Lateral) and Rollover/Vertical Force based on sensor readings.
+- **Emergency SOS:** Provides an emergency countdown with an "I AM SAFE" cancellation option.
+- **GPS Tracking:** Retrieves geographical coordinates and generates Google Maps location links.
+- **SMS Alerts:** Uses Android SIM-based SMS functionality to notify emergency contacts.
+- **Hospital Discovery:** Identifies nearby hospitals using the OpenStreetMap Overpass API.
+- **Email Notifications:** Supports SMTP-based emergency notifications.
+- **Firebase Integration:** Uses Firebase Authentication, Cloud Firestore and Firebase Cloud Messaging.
+- **Role-Based Access:** Provides separate Driver, Hospital and Admin interfaces.
+- **Sensor Monitoring:** Displays real-time sensor readings through a circular force gauge.
+- **Simulation Mode:** Supports manual accident simulation for testing.
 
-## 📌 About the Project
+## Technology Stack
 
-**Accident Guard** is a smart accident detection and emergency response application developed to improve road safety and reduce emergency response time.
-
-The application continuously monitors smartphone sensor readings, including accelerometer and gyroscope data, to identify sudden impacts and potential road accident situations.
-
-When a potential accident is detected, the system activates a 30-second emergency countdown with an audio buzzer. This allows the driver to cancel the alert in case of a false detection.
-
-If the emergency is confirmed or the countdown expires, the application initiates an emergency response workflow. It retrieves the driver's GPS location, searches for nearby hospitals and sends emergency notifications to registered contacts through supported communication channels.
-
-The system provides three dedicated portals:
-
-- 🚗 Driver Portal
-- 🏥 Hospital Portal
-- 🛡️ Administrator Portal
-
-## 🎯 Project Objectives
-
-- Detect potential road accidents using smartphone sensors.
-- Monitor real-time accelerometer and gyroscope readings.
-- Identify sudden impacts using configurable thresholds.
-- Provide an emergency countdown to prevent false alerts.
-- Retrieve GPS location during emergency situations.
-- Identify nearby hospitals using location-based services.
-- Send emergency notifications to registered contacts.
-- Maintain driver profiles and emergency information.
-- Provide separate Driver, Hospital and Admin dashboards.
-- Support cloud-based and local data persistence.
-
----
-
-## ✨ Key Features
-
-### 🚗 1. Driver Portal
-
-- Driver registration and authentication.
-- Driver profile management.
-- Emergency contact management.
-- Real-time sensor monitoring.
-- Automatic accident detection.
-- Manual SOS emergency trigger.
-- GPS location tracking.
-- Emergency alert settings.
-- Engine status monitoring.
-
-### ⚡ 2. Smart Accident Detection
-
-- Real-time accelerometer monitoring.
-- Gyroscope-based movement monitoring.
-- Linear acceleration and G-force monitoring.
-- Configurable impact detection threshold.
-- Default crash threshold of 35.0 m/s².
-- Automatic 30-second emergency countdown.
-- Audio buzzer notification.
-- False-alarm cancellation mechanism.
-- Emergency alert initiation after confirmation or countdown completion.
-
-### 🏥 3. Hospital Portal
-
-- Hospital registration and authentication.
-- Dedicated hospital dashboard.
-- Incoming emergency dispatch information.
-- Patient emergency details.
-- Patient blood group information.
-- Emergency contact details.
-- Location and route navigation information.
-
-### 🛡️ 4. Administrator Portal
-
-- Administrative dashboard.
-- System-wide overview.
-- Driver information management.
-- Hospital information management.
-- Accident and crash history.
-- Emergency dispatch monitoring.
-- Engine status diagnostics.
-
-### 📍 5. GPS Location Tracking
-
-- Retrieves the user's geographical location.
-- Obtains latitude and longitude coordinates.
-- Generates Google Maps location links.
-- Shares location information through emergency notifications.
-- Supports nearby hospital identification.
-
-### 🏥 6. Nearby Hospital Detection
-
-- OpenStreetMap integration.
-- Overpass API-based hospital search.
-- Multiple Overpass endpoint fallback.
-- Hospital search radius expansion.
-- Nominatim fallback when Overpass services are unavailable.
-- Distance calculation using the Haversine formula.
-- Nearby hospital identification.
-- Hospital contact information retrieval when available.
-
-### 📡 7. Multi-Channel Emergency Alerts
-
-The application supports multiple emergency communication methods.
-
-**Direct SIM SMS**
-- Uses Android native Method Channels.
-- Communicates with the device's SMS functionality.
-- Requires SMS permission and cellular network coverage.
-
-**TextBee SMS Gateway**
-- REST API-based SMS communication.
-- Supports emergency notifications to registered contacts.
-- Supports cloud-based SMS dispatch.
-
-**Email Notifications**
-- SMTP-based emergency email communication.
-- Supports structured emergency information.
-- Uses configured email credentials.
-
-**Google Maps Integration**
-- Includes geographical coordinates.
-- Provides location links for emergency responders.
-- Helps recipients navigate to the accident location.
-
-### 🔄 8. Hybrid Online and Offline Architecture
-
-- Firebase Authentication integration.
-- Cloud Firestore database integration.
-- SharedPreferences-based local persistence.
-- Mock/local fallback when Firebase is unavailable.
-- Local storage of supported application information.
-- Hybrid cloud and local data management.
-
-**Offline limitation:** Local storage does not guarantee emergency message delivery. Direct SIM SMS requires cellular network coverage. TextBee, SMTP email, Firebase synchronization and online hospital search require internet connectivity.
-
-### 🔊 9. Emergency Audio Alert
-
-- Automatic buzzer activation.
-- 30-second emergency countdown.
-- Driver cancellation support.
-- Platform-specific audio implementation.
-- Mobile and web audio service handling.
-
-### 🧪 10. Demo and Testing Mode
-
-The application supports demonstration scenarios such as:
-
-- Overspeed simulation.
-- Collision simulation.
-- High-impact simulation.
-- Sensor monitoring.
-- Emergency alert testing.
-- Hospital search testing.
-
----
-
-## 🛠️ Technology Stack
-
-| Category | Technology |
+| Component | Technology |
 |---|---|
 | Mobile Framework | Flutter |
 | Programming Language | Dart |
 | Native Android Integration | Kotlin |
-| UI Framework | Material 3 |
 | Authentication | Firebase Authentication |
-| Cloud Database | Cloud Firestore |
-| Backend Functions | Firebase Cloud Functions |
-| Sensor Integration | sensors_plus |
+| Database | Cloud Firestore |
+| Notifications | Firebase Cloud Messaging |
 | Location Services | Geolocator |
+| Hospital Discovery | OpenStreetMap Overpass API |
+| SMS Integration | Android SmsManager |
+| Email Service | SMTP |
 | Local Storage | SharedPreferences |
-| API Communication | HTTP |
-| Native SMS | Android Method Channels |
-| SMS Gateway | TextBee API |
-| Email Notifications | Mailer / SMTP |
-| Hospital Search | OpenStreetMap Overpass API |
-| Location Fallback | OpenStreetMap Nominatim |
-| Audio Alerts | flutter_ringtone_player |
-| Cloud Functions Runtime | Node.js |
-| Cloud Functions SDK | Firebase Admin SDK |
-| Email Backend | Nodemailer |
-| Version Control | Git and GitHub |
 
----
+## System Workflow
 
-## 🏗️ System Architecture
+1. Collects accelerometer data from the smartphone.
+2. Calculates acceleration magnitude.
+3. Compares sensor readings against the accident detection threshold.
+4. Identifies a potential accident event.
+5. Initiates the emergency SOS countdown.
+6. Retrieves the user's GPS location.
+7. Sends emergency notifications through configured services.
+8. Stores incident information.
 
-Accident Guard follows a modular architecture consisting of the following layers.
+## Offline Support
 
-1. **Presentation Layer**
-   - Flutter screens, dashboards and reusable widgets.
+The application is designed to support essential emergency operations without mobile internet:
 
-2. **Sensor Monitoring Layer**
-   - Collects accelerometer and gyroscope readings.
+- GPS coordinates can be obtained through satellite signals.
+- SIM-based SMS can operate without mobile data when cellular service and SMS functionality are available.
+- Last-known location can be used when a fresh GPS fix is unavailable.
 
-3. **Accident Detection Layer**
-   - Analyses sensor readings and identifies potential impacts.
+Offline map downloads, cached hospital information and persistent emergency retries are planned enhancements.
 
-4. **Location Management Layer**
-   - Retrieves GPS coordinates and searches for nearby hospitals.
-
-5. **Emergency Communication Layer**
-   - Handles SMS and email notifications.
-
-6. **Data Management Layer**
-   - Manages user profiles, emergency contacts, crash records and local persistence.
-
-7. **Cloud Services Layer**
-   - Integrates Firebase Authentication, Cloud Firestore and Cloud Functions.
-
-### Accident Detection Workflow
+## Project Structure
 
 ```text
-              START APPLICATION
-                      |
-                      v
-              DRIVER DASHBOARD
-                      |
-                      v
-              SENSOR MONITORING
-                      |
-                      v
-           ACCELEROMETER & GYROSCOPE
-                      |
-                      v
-            ANALYSE SENSOR READINGS
-                      |
-                      v
-           POTENTIAL IMPACT DETECTED
-                      |
-                      v
-            ACTIVATE 30-SECOND ALARM
-                      |
-                      v
-             EMERGENCY CONFIRMATION
-                      |
-                +-----+-----+
-                |           |
-                v           v
-              CANCEL     CONFIRM
-                |           |
-                v           v
-            FALSE ALARM  GET GPS LOCATION
-                            |
-                            v
-                    FIND NEARBY HOSPITAL
-                            |
-                            v
-                     PREPARE SOS ALERT
-                            |
-                            v
-                    SEND EMERGENCY SMS
-                       AND EMAIL
-                            |
-                            v
-                    UPDATE EMERGENCY DATA
-```
-
----
-
-## 📂 Project Structure
-
-```text
-Major_Project/
-│
+Accident-Guard/
 ├── android/
-│   └── app/
-│       └── src/main/
-│           ├── AndroidManifest.xml
-│           └── kotlin/
-│               └── com/example/
-│                   └── accident_guard_system/
-│                       └── MainActivity.kt
-│
 ├── assets/
-│   └── icon/
-│       └── app_icon.jpg
-│
-├── functions/
-│   ├── index.js
-│   ├── package.json
-│   └── .gitignore
-│
-├── ios/
-│   └── Runner/
-│
-├── web/
-│   ├── index.html
-│   ├── manifest.json
-│   └── icons/
-│
 ├── lib/
-│   ├── main.dart
-│   │
 │   ├── screens/
-│   │   ├── admin_dashboard.dart
-│   │   ├── control_panel.dart
-│   │   ├── hospital_dashboard.dart
-│   │   ├── hospital_registration.dart
-│   │   ├── login_screen.dart
-│   │   ├── sensor_monitoring.dart
-│   │   └── user_registration.dart
-│   │
 │   ├── services/
-│   │   ├── alert_service.dart
-│   │   ├── buzzer_service.dart
-│   │   ├── buzzer_service_mobile.dart
-│   │   ├── buzzer_service_stub.dart
-│   │   ├── buzzer_service_web.dart
-│   │   ├── database_service.dart
-│   │   ├── hospital_service.dart
-│   │   ├── permission_service.dart
-│   │   └── sensor_service.dart
-│   │
-│   └── widgets/
-│       └── emergency_ui_components.dart
-│
+│   ├── widgets/
+│   └── main.dart
 ├── test/
-│   └── widget_test.dart
-│
-├── firebase.json
 ├── pubspec.yaml
-├── pubspec.lock
-├── analysis_options.yaml
-├── .gitignore
 └── README.md
 ```
 
----
+## Installation and Setup
 
-## ⚙️ Installation and Setup
+**Prerequisites**
+- Flutter SDK
+- Dart SDK
+- Android Studio
+- Android SDK
+- Firebase project configuration
 
-### Prerequisites
-
-Install the following development tools:
-
-- Flutter SDK compatible with the project's Dart SDK constraint.
-- Dart SDK 3.12.2 or compatible version.
-- Android Studio or Visual Studio Code.
-- Android SDK.
-- Git.
-- Node.js and npm for Firebase Cloud Functions.
-- Firebase account.
-
-### Step 1: Clone the Repository
+**1. Clone the repository**
 
 ```bash
 git clone https://github.com/vaibhavpoojari/Major_Project.git
 ```
 
-### Step 2: Navigate to the Project
+**2. Navigate to the project**
 
 ```bash
-cd Major_Project
+cd Accident-Guard
 ```
 
-### Step 3: Install Flutter Dependencies
+**3. Install dependencies**
 
 ```bash
 flutter pub get
 ```
 
-### Step 4: Configure Firebase
+**4. Configure Firebase**
 
-1. Create a project in Firebase Console.
-2. Register your Android application.
-3. Configure Firebase Authentication.
-4. Enable Cloud Firestore.
-5. Configure the required Firebase services.
-6. Add the appropriate Firebase configuration files.
-7. Verify Firebase initialization.
+Add your Firebase Android configuration file and configure the required Firebase services.
 
-The application includes a local/mock fallback when Firebase initialization or availability fails.
-
-### Step 5: Configure Emergency Services
-
-Configure the required credentials for:
-
-- TextBee API Key.
-- TextBee Device ID.
-- SMTP email address.
-- SMTP application password.
-- Firebase Cloud Functions secrets.
-
-Use secure configuration methods for private credentials. Never commit passwords, API secrets or service account private keys to a public GitHub repository.
-
-### Step 6: Run the Application
+**5. Run the application**
 
 ```bash
 flutter run
 ```
 
-Run on a connected Android device:
+## Build APK
+
+Generate an optimized ARM64 release APK:
 
 ```bash
-flutter run -d android
+flutter build apk --release --target-platform android-arm64
 ```
 
-Run on Chrome:
-
-```bash
-flutter run -d chrome
-```
-
----
-
-## ☁️ Firebase Cloud Functions Setup
-
-The project includes a Node.js-based Firebase Cloud Functions backend.
-
-Navigate to the functions directory:
-
-```bash
-cd functions
-```
-
-Install Node.js dependencies:
-
-```bash
-npm install
-```
-
-Authenticate Firebase CLI and select the configured Firebase project.
-
-Configure the required secrets:
-
-```bash
-firebase functions:secrets:set TEXTBEE_API_KEY
-firebase functions:secrets:set TEXTBEE_DEVICE_ID
-firebase functions:secrets:set EMERGENCY_EMAIL
-firebase functions:secrets:set EMERGENCY_EMAIL_APP_PASSWORD
-```
-
-Run the Firebase emulator:
-
-```bash
-npm run serve
-```
-
-Deploy Cloud Functions:
-
-```bash
-npm run deploy
-```
-
-View function logs:
-
-```bash
-npm run logs
-```
-
-The backend provides emergency dispatch and test endpoints for SMS and email configuration.
-
----
-
-## 📦 Building the Android APK
-
-To generate a release APK:
-
-```bash
-flutter build apk --release
-```
-
-The generated APK will be available at:
+APK output:
 
 ```text
 build/app/outputs/flutter-apk/app-release.apk
 ```
 
-To generate a web release:
+## Testing
+
+Run static analysis:
 
 ```bash
-flutter build web --release
+flutter analyze
 ```
 
-The generated web files will be available in:
+Run automated tests:
 
-```text
-build/web/
+```bash
+flutter test
 ```
 
----
+## Future Enhancements
 
-## 🧪 Testing and Demonstration
+- Offline map support.
+- Persistent emergency event storage.
+- Automatic SMS retry.
+- Accident history and analytics.
+- Emergency contact management.
+- GPS and network status monitoring.
+- English, Kannada and Hindi localization.
 
-| Test Scenario | Description |
-|---|---|
-| Sensor Monitoring | Observe real-time sensor readings |
-| Impact Detection | Test the configured crash threshold |
-| Emergency Countdown | Verify the 30-second countdown |
-| False Alarm | Test driver cancellation |
-| Manual SOS | Trigger an emergency manually |
-| GPS Tracking | Verify location retrieval |
-| Hospital Search | Identify nearby hospitals |
-| Native SMS | Test SIM-based SMS dispatch |
-| TextBee SMS | Test cloud SMS communication |
-| Email Notification | Test SMTP email dispatch |
-| Firebase | Verify cloud database operations |
-| Local Fallback | Test local data persistence |
+## Limitations
 
----
+- Accident detection depends on smartphone sensor readings and configured thresholds.
+- GPS accuracy depends on satellite reception.
+- SMS requires an active SIM and cellular network coverage.
+- Hospital discovery through OpenStreetMap requires internet unless data is cached.
+- Background execution depends on Android operating-system restrictions.
 
-## ⚠️ Technical Limitations
+## Project Information
 
-- Sensor-based accident detection may generate false positives or false negatives.
-- Detection accuracy depends on smartphone hardware and sensor readings.
-- GPS accuracy depends on signal availability and environmental conditions.
-- Direct SIM SMS requires cellular network coverage and appropriate Android permissions.
-- TextBee and SMTP email services require internet connectivity.
-- Firebase synchronization requires internet connectivity.
-- Online hospital search requires an internet connection.
-- Hospital contact details depend on the availability and accuracy of OpenStreetMap data.
-- Background execution depends on Android permissions and operating system restrictions.
-- Local data persistence does not guarantee immediate emergency communication.
-
-**Emergency Disclaimer:**
-
-Accident Guard is an academic prototype developed for educational and research purposes. It is not a certified vehicle crash detection system and must not replace official emergency services.
-
-In India, contact the official emergency helpline **112** during an actual emergency.
-
----
-
-## 🚀 Future Enhancements
-
-- Machine learning-based accident detection.
-- Improved false-positive reduction.
-- Advanced sensor data analytics.
-- More reliable background monitoring.
-- Enhanced offline emergency communication.
-- Improved hospital availability verification.
-- Integration with vehicle-based IoT hardware.
-- Advanced emergency response analytics.
-- Multilingual application support.
-
----
-
-## 👨‍💻 Project Information
-
-| Detail | Information |
-|---|---|
-| Project Name | Accident Guard |
-| Project Title | Smart Accident Detection and Emergency Alert System |
-| Domain | IoT and Mobile Application Development |
-| Framework | Flutter |
-| Programming Language | Dart |
-| Native Integration | Kotlin |
-| Backend | Firebase |
-| Database | Cloud Firestore |
-| Project Type | Final Year Major Project |
-
----
-
-## 👥 Project Team
-
-| Sl. No. | Team Member | USN |
-|---|---|---|
-| 1 | Vaibhava G | 4MW23CS179 |
-| 2 | Sathwik C Shetty | 4MW23CS139 |
-| 3 | Sathvik S Naik | 4MW23CS138 |
-| 4 | Shivaraja S K | 4MW23CS146 |
-| 5 | Vighnesh | 4MW23CS183 |
-
----
-
-## 📜 License
-
-This project is developed for academic and educational purposes.
-
-Please contact the project authors before reusing or redistributing the source code.
-
----
-
-<p align="center">
-
-  <h2>🚨 ACCIDENT GUARD</h2>
-
-  <b>Detect Early. Alert Quickly. Save Lives.</b>
-
-  <br>
-
-  Developed as an academic major project.
-
-</p>
+**Project:** Accident Guard  
+**Platform:** Android  
+**Framework:** Flutter  
+**Language:** Dart  
+**Architecture:** ARM64
